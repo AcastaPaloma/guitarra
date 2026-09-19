@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))                  # fret.py / app.py
 sys.path.insert(0, str(HERE.parent / "guitar"))  # model.baseten
 
+import calibration  # noqa: E402
 from fret import FretArm, load_grid, STRING_NOTES, MAX_FRET  # noqa: E402
 from model.baseten import BasetenClient, BasetenError, load_env  # noqa: E402
 
@@ -102,11 +103,23 @@ def _play_thread(notes, gap_s):
 
 
 app = FastAPI()
+app.include_router(calibration.router)
+calibration.set_play_guard(lambda: state["playing"])
+
+
+@app.get("/calibrate")
+def calibrate_page():
+    return HTMLResponse(calibration.PAGE)
 
 
 @app.get("/api/bootstrap")
 def bootstrap():
-    cells, _, _ = load_grid()
+    try:
+        cells, _, _ = load_grid()
+    except (ValueError, FileNotFoundError):
+        # keypoints cleared / not yet recorded — console loads, playing won't work
+        return {"keys": [], "max_notes": MAX_NOTES, "hardware": "real",
+                "plucking": False, "warning": "no keypoints recorded — calibrate first"}
     return {"keys": [{"string": s, "fret": f, "pitch": PLAYABLE[(s, f)]}
                      for (s, f) in sorted(cells)],
             "max_notes": MAX_NOTES, "hardware": "real", "plucking": False}
@@ -142,6 +155,9 @@ def plan(req: PlanReq):
 
 @app.post("/api/play")
 def play(req: PlayReq):
+    if calibration.session_active():
+        raise HTTPException(409, "calibration holds the serial port — "
+                                 "disconnect on /calibrate first")
     with _state_lock:
         if state["playing"]:
             raise HTTPException(409, "already playing — stop it first")
@@ -214,7 +230,7 @@ PAGE = """<!doctype html>
   #count { font-size:12px; margin-top:6px; }
 </style></head><body>
 <h1>GUITARRA</h1>
-<div class="sub">one arm &middot; eighteen keys &middot; tap only</div>
+<div class="sub">one arm &middot; eighteen keys &middot; tap only &middot; <a href="/calibrate" style="color:var(--accent)">calibrate</a></div>
 <main>
   <div class="steps">
     <span class="step on" id="st1">1 PROMPT</span>

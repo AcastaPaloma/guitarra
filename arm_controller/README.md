@@ -22,6 +22,21 @@ uv run --with pyserial python fret.py --seq 1,1 2,2   # tap a sequence
 
 Close the GUI before running `fret.py` — the serial port is exclusive.
 
+### Web calibration (preferred over the GUI)
+
+```bash
+uv run --no-project --with fastapi --with uvicorn --with pyserial \
+    python webapp.py --port 8787    # then open http://127.0.0.1:8787/calibrate
+```
+
+CONNECT → torque OFF → pose by hand → CAPTURE. Once the kinematic reference
+pose is captured (see `kinematics.py` for the measured geometry), every
+keypoint stores raw servo counts **plus** per-joint degrees and the
+fingertip's world XYZ in cm, so later planners can reason spatially about
+positions instead of only in servo counts. The reference lives in
+`calibration_arm2.json`; keypoints in `keyframes_arm2.json` (schema is
+backward compatible — `fret.py` plays the raw counts and ignores the rest).
+
 ## Hardware assumptions
 
 - Port `/dev/cu.wchusbserial5B8E1128501` at 1,000,000 baud (re-enumerates on
