@@ -17,6 +17,7 @@ import uuid
 from band.adapters.lamp.client import LampClient
 from band.performance.composer import StageEnvelope, compose
 from band.performance.primitives import scene
+from band.rehearsal.observe import capture_is_fresh
 
 
 def load_scene(directory):
@@ -43,7 +44,7 @@ def execute(directory, output, base_url, token, camera_reference):
         raise ValueError("Supply the live recorder's camera-log.jsonl for this trial")
     # Receipt logs are appended during capture; this checks recorder liveness,
     # not physical clearance, field of view, or capture latency.
-    if not 0 <= time.time() - camera_reference.stat().st_mtime <= 3:
+    if not capture_is_fresh(camera_reference):
         raise ValueError("External camera log is stale; start the recorder and inspect its live view")
     output.mkdir(parents=True, exist_ok=False)
     run_id = uuid.uuid4().hex
@@ -70,7 +71,7 @@ def execute(directory, output, base_url, token, camera_reference):
             event("submitted", action)
 
             def update(timestamp, current):
-                if not 0 <= time.time() - camera_reference.stat().st_mtime <= 3:
+                if not capture_is_fresh(camera_reference):
                     raise RuntimeError("External camera recorder stopped updating")
                 event("action", current)
                 event("telemetry", asdict(client.observe()))

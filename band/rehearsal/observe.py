@@ -17,6 +17,15 @@ import time
 import urllib.request
 
 
+def capture_is_fresh(path: Path, maximum_age=3.0, *, wall_clock=time.time):
+    """Read the file timestamp before the clock to avoid a concurrent-write race."""
+    try:
+        modified = path.stat().st_mtime
+    except FileNotFoundError:
+        return False
+    return 0 <= wall_clock() - modified <= maximum_age
+
+
 def get_json(base: str, path: str) -> dict:
     before = time.monotonic_ns()
     wall = time.time_ns()
@@ -46,6 +55,7 @@ def observe(base: str, output: Path, seconds: float, ffmpeg: str | None,
         raise ValueError("Recording duration must be 1–120 seconds")
     output.mkdir(parents=True, exist_ok=False)
     started = time.monotonic_ns()
+    audio_requested = ":" in camera and camera.rsplit(":", 1)[1] not in ("", "none")
     manifest = {"schema_version": 1, "started_mono_ns": started,
                 "started_wall_ns": time.time_ns(), "duration_requested_s": seconds,
                 "clock": "observer time.monotonic_ns", "camera_device": camera,
@@ -53,6 +63,7 @@ def observe(base: str, output: Path, seconds: float, ffmpeg: str | None,
                 "camera_latency_s": None, "audio_latency_s": None,
                 "encoder_capture_time_available": False,
                 "motion_commands_sent": 0, "camera_requested": bool(ffmpeg)}
+    manifest["audio_requested"] = bool(ffmpeg) and audio_requested
     snapshots = {"before": [get_json(base, p) for p in (
         "/api/animations/status", "/api/motors/positions",
         "/api/audio/output-devices", "/api/perception/status")]}
@@ -64,7 +75,14 @@ def observe(base: str, output: Path, seconds: float, ffmpeg: str | None,
                    "-framerate", "30", "-video_size", "1280x720", "-pixel_format", "uyvy422",
                    "-i", camera, "-t", str(seconds), "-vf", "showinfo",
                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
-                   "-pix_fmt", "yuv420p", str(output / "camera.mkv")]
+                   "-pix_fmt", "yuv420p"]
+        if audio_requested:
+            command.extend(["-af", "ashowinfo", "-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1"])
+        command.append(str(output / "camera.mkv"))
+        # A current physical-camera frame for supervision; this is not a
+        # screenshot of the desktop and never captures another application.
+        command.extend(["-map", "0:v:0", "-vf", "fps=2", "-c:v", "mjpeg", "-q:v", "3",
+                        "-f", "image2", "-update", "1", "-t", str(seconds), str(output / "live.jpg")])
         manifest["camera_process_started_mono_ns"] = time.monotonic_ns()
         try:
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL,
@@ -73,7 +91,7 @@ def observe(base: str, output: Path, seconds: float, ffmpeg: str | None,
             manifest.update(camera_capture_failed=True, camera_start_error=type(error).__name__)
 
         def read_camera_log():
-            with (output / "camera-log.jsonl").open("w") as log:
+            with (output / "camera-log.jsonl").open("w", buffering=1) as log:
                 for line in process.stderr:
                     log.write(json.dumps({"received_mono_ns": time.monotonic_ns(),
                                           "ffmpeg": line.rstrip()}) + "\n")
