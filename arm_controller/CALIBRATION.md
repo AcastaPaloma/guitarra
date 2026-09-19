@@ -75,6 +75,29 @@ tip point. Implementation: `kinematics.py` (self-test: `python kinematics.py`).
 - **Strings plane**: `above_strings_cm ≈ 0` should hold for every touch
   pose; a consistent bias there measures the model's z error directly.
 
+## Extrapolation results (2026-09-19, full 18-cell grid)
+
+`gridfit.py` fits bilinear models over (string, fret-position) — the fret
+axis uses the real guitar law `u = 12·(1 − 2^(−f/12))` — for each XYZ
+component and each motor's counts. On the recorded grid:
+
+- fit RMS **1.94 cm**, leave-one-out RMS **2.59 cm**
+- worst cells: s6f1 (5.2 cm), s6f2 (4.8 cm), s5f2 (4.4 cm) — the low-string
+  fret-1/2 poses were likely recorded with a wrist tilt the planar FK
+  doesn't model; re-record to improve the fit
+- spot-check against stray hand-recorded anchors: keyframes named "2" and
+  "3" sit 0.7 / 1.3 cm from the predicted low-E fret-2/3 cells; "5" is
+  1.5–2 cm from a fret-5 prediction. Anchors "7" and "10" don't match any
+  prediction (7–13 cm) — unexplained, possibly different wrist configs.
+
+Verdict: XYZ is consistent enough for **relative spatial reasoning and
+neighbor-cell extrapolation (±~2.5 cm)**; predicted counts are a starting
+pose to refine, not a playable target. Recording one or two anchor poses
+at frets 5/7 would pin down the up-neck extrapolation properly.
+
+Tools: `estimate_position` (any string, fret 1-9) in `fret.py`'s TOOLS;
+CLI `python fret.py --estimate S F`, `python gridfit.py --report`.
+
 ## Files & schema
 
 - `calibration_arm2.json` — ref counts + signs + geometry (committed).

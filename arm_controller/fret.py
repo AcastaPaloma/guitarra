@@ -5,28 +5,36 @@ the whole instrument now: it sounds notes by TAPPING the pre-recorded keys
 (hammer-on style — press the string onto the fret fast, then lift). pluck.py
 is retired; do not wire its tools into any backend.
 
-v2 MAPPING (2026-09-19, supersedes the old 110-pose fret map — the operator
-found it inaccurate; do NOT fall back to guitar/robot/poses/fret_arm.json):
+v3 MAPPING (2026-09-19, full 18-cell grid re-recorded against the committed
+kinematic baseline — see CALIBRATION.md; supersedes v2 and the old 110-pose
+fret map; do NOT fall back to guitar/robot/poses/fret_arm.json):
   keyframes_arm2.json holds one keypoint per cell, named pose-r{R}-c{C}:
-    r = fret row (1..3 supported for now — first rows of the neck only)
+    r = fret row (1..3 recorded)
     c = string/column, SAME convention as plucking: 1 = high E (rightmost)
         ... 6 = low E (leftmost)
-  Values are RAW servo counts for IDs 7-11 (recorded with the keyframe GUI),
-  so no unit conversion is involved. 'rest' is the recorded safe park pose.
-  The GRIPPER (ID 12) holds the fingertip tool and is NEVER commanded.
+  Values are RAW servo counts for IDs 7-11 (still the played source of
+  truth); each keypoint also carries "degrees" (relative to the baseline
+  pose) and "xyz_cm" (fingertip world position, kinematics.py) so callers
+  can reason spatially. 'rest' is the safe park pose; 'rest-r{R}' are
+  per-fret-row lifted hubs. The GRIPPER (ID 12) is NEVER commanded.
 
-=== SAFETY / INTERFERENCE (v2 contract) ======================================
-The v2 grid has no above/touch pairs, so there is no hover surface to
-translate on. Until hover poses are recorded, EVERY transition routes through
-'rest' as the safe hub:  press -> rest -> press.  Slower than hovering, but it
-can never scrape the strings or the neck. If a faster path is wanted later,
-record per-cell hover keypoints and restore the LIFT->TRANSLATE->PRESS
-staging (see git history of this file for that implementation).
+=== SAFETY / INTERFERENCE (v3 contract) ======================================
+Transitions are staged through lifted hubs, never sliding on the board:
+  LIFT to the current row's hub -> travel to the target row's hub (if the
+  row changed) -> PRESS. Rows without a recorded 'rest-r{R}' hub fall back
+  to the global 'rest'. First motion after connect always routes via a hub
+  from 'rest'-ward, so the arm can never scrape across strings or neck.
 ==============================================================================
+
+XYZ deduction/extrapolation lives in gridfit.py: bilinear fits over the
+recorded grid predict fingertip XYZ and approximate servo counts for ANY
+(string, fret), including unrecorded frets (estimate_position tool; no
+motion — predictions are a planning aid, not directly playable).
 
 CLI:
   uv run --with pyserial python fret.py --list
   uv run --with pyserial python fret.py --pose 3 2      # string 3, fret 2 (no motion)
+  uv run --with pyserial python fret.py --estimate 3 5  # extrapolated cell (no motion)
   uv run --with pyserial python fret.py --tap 3 2       # tap one key (sounds the note)
   uv run --with pyserial python fret.py --seq 1,1 2,1 3,2   # tap several keys in order
   uv run --with pyserial python fret.py --hold 3 2
@@ -58,16 +66,23 @@ SETTLE_TIMEOUT = 4.0
 
 _CELL = re.compile(r"pose[-_]?r(\d+)[-_]?c(\d+)$")
 _CELL_T = re.compile(r"pose[-_]?c(\d+)[-_]?r(\d+)$")  # transposed name variant
+_ROW_REST = re.compile(r"rest[-_]?r(\d+)$")
 
 
-def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET):
-    """-> (cells{(string, fret): raw_pose}, rest_pose, warnings[list of str])."""
-    cells, rest, warns = {}, None, []
+def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET):
+    """-> {"cells": {(string, fret): raw_pose}, "rest": pose,
+           "row_rests": {fret: pose}, "xyz": {(string, fret): xyz_cm dict},
+           "degrees": {(string, fret): {sid: deg}}, "warns": [str]}"""
+    cells, xyz, degrees, row_rests, rest, warns = {}, {}, {}, {}, None, []
     for k in json.loads(Path(path).read_text()):
         name = k["name"].strip().lower()
         pose = {int(sid): int(v) for sid, v in k["positions"].items() if int(sid) in MOTOR_IDS}
         if name == "rest":
             rest = pose
+            continue
+        rr = _ROW_REST.fullmatch(name)
+        if rr:
+            row_rests[int(rr.group(1))] = pose
             continue
         m = _CELL.fullmatch(name) or _CELL_T.fullmatch(name)
         if not m:
@@ -82,14 +97,27 @@ def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET):
             warns.append(f"duplicate for string {c} fret {r} ignored: {k['name']}")
             continue
         cells[(c, r)] = pose
+        if k.get("xyz_cm"):
+            xyz[(c, r)] = k["xyz_cm"]
+        if k.get("degrees"):
+            degrees[(c, r)] = k["degrees"]
     if rest is None:
         raise ValueError("no 'rest' keyframe in the grid — required as the safe hub")
-    return cells, rest, warns
+    return {"cells": cells, "rest": rest, "row_rests": row_rests,
+            "xyz": xyz, "degrees": degrees, "warns": warns}
+
+
+def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET):
+    """Back-compat view: -> (cells, rest_pose, warnings)."""
+    m = load_map(path, max_fret)
+    return m["cells"], m["rest"], m["warns"]
 
 
 class FretArm:
     def __init__(self, port=FRET_PORT, baud=BAUD):
-        self.cells, self.rest_pose, self.warnings = load_grid()
+        m = load_map()
+        self.cells, self.rest_pose, self.warnings = m["cells"], m["rest"], m["warns"]
+        self.row_rests, self.xyz = m["row_rests"], m["xyz"]
         self.bus = FeetechBus(port, baud)
         alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
         if len(alive) < len(MOTOR_IDS):
@@ -97,6 +125,7 @@ class FretArm:
         for sid in alive:
             self.bus.set_torque(sid, True)
         self.holding = None  # (string, fret) or None
+        self.last_row = None  # fret row the arm last worked in (None = unknown)
 
     def close(self, torque_off=False):
         if torque_off:  # only when the arm is physically supported
@@ -123,21 +152,37 @@ class FretArm:
                              f"recorded cells (string, fret): {have}")
         return self.cells[(string, fret)]
 
+    def _hub(self, fret):
+        """Lifted hub pose for a fret row; global rest if none recorded."""
+        return self.row_rests.get(int(fret), self.rest_pose)
+
+    def _lift(self):
+        """Rise off the board into the current row's hub (rest if unknown)."""
+        hub = self._hub(self.last_row) if self.last_row is not None else self.rest_pose
+        self._move(hub, TRAVEL_SPEED)
+
+    def _stage(self, fret):
+        """Scrape-safe approach: lift, then cross to the target row's hub."""
+        self._lift()
+        if self.last_row != fret:
+            self._move(self._hub(fret), TRAVEL_SPEED)
+
     # ---- tools ----------------------------------------------------------
 
     def tap_key(self, string, fret):
         """Tap (string, fret): fast press to sound the note, brief dwell, lift.
 
         The only way this rig makes sound now — the tap impact is the attack.
-        Routes via rest like every transition (scrape-safe)."""
-        pose = self._cell(int(string), int(fret))
-        self._move(self.rest_pose, TRAVEL_SPEED)   # safe hub
+        Staged via lifted row hubs (scrape-safe)."""
+        s, f = int(string), int(fret)
+        pose = self._cell(s, f)
+        self._stage(f)
         self._move(pose, TAP_SPEED)                # fast press = the note
         time.sleep(TAP_DWELL_S)
-        self._move(self.rest_pose, TRAVEL_SPEED)   # lift
-        self.holding = None
-        return {"status": "tapped", "string": int(string), "fret": int(fret),
-                "note_open": STRING_NOTES.get(int(string))}
+        self._move(self._hub(f), TRAVEL_SPEED)     # lift back into the row hub
+        self.holding, self.last_row = None, f
+        return {"status": "tapped", "string": s, "fret": f,
+                "note_open": STRING_NOTES.get(s), "xyz_cm": self.xyz.get((s, f))}
 
     def tap_sequence(self, keys, gap_s=0.3):
         """Tap several (string, fret) keys in order with a fixed gap."""
@@ -149,24 +194,28 @@ class FretArm:
         return results
 
     def hold_fret(self, string, fret):
-        """Press (string, fret) and HOLD. Routes via rest — never slides on the board."""
-        pose = self._cell(int(string), int(fret))
-        self._move(self.rest_pose, TRAVEL_SPEED)   # safe hub
+        """Press (string, fret) and HOLD. Staged via row hubs — never slides."""
+        s, f = int(string), int(fret)
+        pose = self._cell(s, f)
+        self._stage(f)
         self._move(pose, PRESS_SPEED)
-        self.holding = (int(string), int(fret))
-        return {"status": "holding", "string": int(string), "fret": int(fret),
-                "note_open": STRING_NOTES.get(int(string)), "target_raw": pose}
+        self.holding, self.last_row = (s, f), f
+        return {"status": "holding", "string": s, "fret": f,
+                "note_open": STRING_NOTES.get(s), "target_raw": pose,
+                "xyz_cm": self.xyz.get((s, f))}
 
     def release_fret(self):
-        """Lift off the current hold back to rest."""
+        """Lift off the current hold into the row's hub."""
         was = self.holding
-        self._move(self.rest_pose, TRAVEL_SPEED)
+        self._lift()
         self.holding = None
         return {"status": "released", "was_holding": was}
 
     def rest(self):
+        """Park: lift out of the board first, then settle in the global rest."""
+        self._lift()
         self._move(self.rest_pose, TRAVEL_SPEED)
-        self.holding = None
+        self.holding, self.last_row = None, None
         return {"status": "rest"}
 
 
@@ -236,12 +285,31 @@ TOOLS = [
     {
         "name": "get_fret_position",
         "description": "Return the exact raw servo targets for holding (string, "
-                       "fret), plus which cells are recorded. No motion.",
+                       "fret), the recorded fingertip xyz_cm (world frame, see "
+                       "CALIBRATION.md) and joint degrees, plus which cells are "
+                       "recorded. No motion.",
         "parameters": {
             "type": "object",
             "properties": {
                 "string": {"type": "integer", "minimum": 1, "maximum": 6},
                 "fret": {"type": "integer", "minimum": 1, "maximum": 3},
+            },
+            "required": ["string", "fret"],
+        },
+    },
+    {
+        "name": "estimate_position",
+        "description": "PREDICT the fingertip xyz_cm and approximate servo "
+                       "counts for ANY (string, fret) by fitting the recorded "
+                       "grid — works for unrecorded cells too (e.g. fret 4+, "
+                       "extrapolated). Leave-one-out RMS error ~2.5 cm on the "
+                       "recorded grid; use as a spatial planning aid, NOT as a "
+                       "playable target. No motion.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "string": {"type": "integer", "minimum": 1, "maximum": 6},
+                "fret": {"type": "integer", "minimum": 1, "maximum": 9},
             },
             "required": ["string", "fret"],
         },
@@ -255,15 +323,32 @@ TOOLS = [
 
 
 def dispatch(arm, tool_name, args):
-    """Backend entry point. get_fret_position works with arm=None (no hardware)."""
+    """Backend entry point. get_fret_position and estimate_position work with
+    arm=None (no hardware)."""
     if tool_name == "get_fret_position":
-        cells = arm.cells if arm else load_grid()[0]
+        m = load_map()
         s, f = int(args["string"]), int(args["fret"])
-        if (s, f) not in cells:
+        if (s, f) not in m["cells"]:
             return {"error": f"no keypoint for string {s} fret {f}",
-                    "recorded_cells": sorted(cells)}
+                    "recorded_cells": sorted(m["cells"])}
         return {"string": s, "fret": f, "note_open": STRING_NOTES.get(s),
-                "target_raw": cells[(s, f)], "recorded_cells": sorted(cells)}
+                "target_raw": m["cells"][(s, f)], "xyz_cm": m["xyz"].get((s, f)),
+                "degrees": m["degrees"].get((s, f)),
+                "recorded_cells": sorted(m["cells"])}
+    if tool_name == "estimate_position":
+        import gridfit
+        cells = gridfit.load_cells()
+        if len(cells) < 6:
+            return {"error": f"only {len(cells)} recorded cells with xyz — "
+                             "record more before estimating"}
+        s, f = int(args["string"]), int(args["fret"])
+        out = gridfit.predict(gridfit.fit_models(cells), s, f)
+        out.update(string=s, fret=f, recorded=(s, f) in cells,
+                   extrapolated=(s, f) not in cells,
+                   note="fitted prediction — planning aid, not a playable target")
+        if not out["extrapolated"]:
+            out["recorded_xyz"] = cells[(s, f)]["xyz"]
+        return out
     if tool_name == "tap_key":
         return arm.tap_key(args["string"], args["fret"])
     if tool_name == "tap_sequence":
@@ -283,6 +368,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Single-arm tap/fret tool CLI (v2 grid)")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--pose", nargs=2, type=int, metavar=("STRING", "FRET"))
+    ap.add_argument("--estimate", nargs=2, type=int, metavar=("STRING", "FRET"),
+                    help="predict xyz + counts for any cell (extrapolates; no motion)")
     ap.add_argument("--tap", nargs=2, type=int, metavar=("STRING", "FRET"))
     ap.add_argument("--seq", nargs="+", metavar="S,F", help="keys to tap, e.g. 1,1 2,1 3,2")
     ap.add_argument("--gap", type=float, default=0.3, help="seconds between --seq taps")
@@ -291,16 +378,20 @@ if __name__ == "__main__":
     ap.add_argument("--rest", action="store_true")
     a = ap.parse_args()
 
-    if a.list or a.pose:
-        cells, rest, warns = load_grid()
-        for w in warns:
+    if a.list or a.pose or a.estimate:
+        m = load_map()
+        for w in m["warns"]:
             print("WARN:", w)
         if a.list:
-            print(f"{len(cells)} cells recorded (string, fret): {sorted(cells)}")
-            print(f"rest: {rest}")
+            print(f"{len(m['cells'])} cells recorded (string, fret): {sorted(m['cells'])}")
+            print(f"row hubs: {sorted(m['row_rests'])}   rest: {m['rest']}")
         if a.pose:
             print(json.dumps(dispatch(None, "get_fret_position",
                                       {"string": a.pose[0], "fret": a.pose[1]}), indent=2))
+        if a.estimate:
+            print(json.dumps(dispatch(None, "estimate_position",
+                                      {"string": a.estimate[0], "fret": a.estimate[1]}),
+                             indent=2))
         raise SystemExit(0)
 
     arm = FretArm()
