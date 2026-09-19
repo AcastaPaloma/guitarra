@@ -97,8 +97,11 @@ def test_planner_completion_contract(mutation):
 
 def test_take_validation_is_current_and_bounded():
     plans.validate_take(baseline(), KEYS)
-    with pytest.raises(ValueError, match="short take"):
-        plans.validate_take(plans.TapPlan(notes=baseline().notes * 2), KEYS)
+    # Full-arrangement takes are allowed now; the execution-time budget is the bound.
+    over_budget = plans.TapPlan(notes=(baseline().notes * plans.MAX_NOTES)[:plans.MAX_NOTES])
+    assert len(over_budget.notes) * 3.2 > plans.MAX_PLAY_SECONDS
+    with pytest.raises(ValueError, match="execution budget"):
+        plans.validate_take(over_budget, KEYS)
     with pytest.raises(ValueError, match="current recording"):
         plans.validate_take(baseline(), {(1, 1)})
     with pytest.raises(ValidationError):

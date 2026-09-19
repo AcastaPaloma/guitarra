@@ -256,9 +256,12 @@ function showReview(record) {
   lastReview = record;
   $('attempt-label').textContent = String(record.take_number || record.attempt_number);
   const assessment = record.assessment;
-  $('assessment-status').textContent = assessment ? `notes ${rating(assessment.notes_match)} · timing ${rating(assessment.timing_match)}` : 'review unavailable';
+  $('assessment-status').textContent = assessment
+    ? `${typeof assessment.score === 'number' ? `take score ${assessment.score}/10 · ` : ''}notes ${rating(assessment.notes_match)} · timing ${rating(assessment.timing_match)}`
+    : 'review unavailable';
   $('assessment-summary').textContent = brief(assessment?.summary || record.error || 'No audio assessment received.');
-  list('observations', assessment ? [assessment.summary, `Recording quality: ${assessment.recording_quality}`, ...assessment.observations] : []);
+  list('observations', assessment ? [assessment.summary, `Recording quality: ${assessment.recording_quality}`,
+    ...assessment.observations, ...(assessment.suggestions || []).map(s => `try: ${s}`)] : []);
   list('limitations', assessment?.limitations || []);
   if (record.revision) {
     $('proposal').hidden = false;

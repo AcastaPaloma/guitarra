@@ -22,7 +22,7 @@
     <section id="plan" hidden>
       <div class="section-title"><h2 id="title">Arrangement</h2><button id="change-song" class="text-button">change</button></div>
       <div class="notes" id="notes"></div>
-      <div class="take-controls"><label>From <input id="take-start" type="number" min="1" value="1"></label><label>Take <input id="take-count" type="number" min="1" max="4" value="4"> notes</label><span class="hint">up to 4 per take</span></div>
+      <div class="take-controls"><label>From <input id="take-start" type="number" min="1" value="1"></label><label>Take <input id="take-count" type="number" min="1" max="64" value="64"> notes</label><span class="hint">defaults to the whole song</span></div>
       <p id="selected" class="hint"></p>
       <div id="now" hidden><b id="now-pitch">—</b><span id="now-note"></span><div class="bar"><div id="fill"></div></div><span id="count" class="hint"></span></div>
       <div class="play-actions"><button class="btn primary" id="play" disabled>PLAY + LISTEN</button><button class="btn" id="stop" title="Cooperative stop; the current bounded tap/lift may finish. Not a physical E-stop." disabled>STOP</button><span id="recording">Mic off</span></div>

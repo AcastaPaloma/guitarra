@@ -170,9 +170,19 @@ def test_provider_timeout_is_unavailable_not_bad_performance(manager):
     assert not manager.revise.called and manager.execute.call_count == 1
 
 
-def test_uncertain_audio_skips_revision(manager):
+def test_uncertain_audio_still_reaches_the_planner(manager):
+    # Policy 2026-09-19: only "unusable" blocks; uncertain hearing proceeds
+    # with its caveats so the operator still gets a graded review.
     report = evaluate()
     report["assessment"]["recording_quality"] = "uncertain"
+    manager.evaluate.side_effect = lambda *a, **kw: report
+    result = complete(manager)
+    assert result["phase"] == "review_ready" and manager.revise.called
+
+
+def test_unusable_audio_skips_revision(manager):
+    report = evaluate()
+    report["assessment"]["recording_quality"] = "unusable"
     manager.evaluate.side_effect = lambda *a, **kw: report
     result = complete(manager)
     assert result["phase"] == "inspect" and not manager.revise.called

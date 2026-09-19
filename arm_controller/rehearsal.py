@@ -458,10 +458,12 @@ class RehearsalManager:
                     self._finish(attempt, "unavailable", report.get("error", "Audio assessment unavailable"))
                     return
                 assessment = record["assessment"] = report["assessment"]
-                if (assessment["recording_quality"] not in {"usable", "limited"}
-                        or all(assessment[k] in {"uncertain", "not_assessed"}
-                               for k in ("notes_match", "timing_match"))):
-                    self._finish(attempt, "inspect", "Insufficient acoustic evidence; inspect/listen, do not compensate")
+                # Only a genuinely empty/corrupt recording blocks the loop now.
+                # Uncertain hearing still reaches the planner WITH its caveats —
+                # the operator sees the graded score/suggestions either way, and
+                # the planner may simply decide "keep" on weak evidence.
+                if assessment["recording_quality"] == "unusable":
+                    self._finish(attempt, "inspect", "Recording unusable; check the microphone, then listen and retake")
                     return
                 if record["attempt_number"] >= MAX_ATTEMPTS:
                     self._finish(attempt, "inspect", "Three-attempt budget reached; assessment saved, no further revision")
