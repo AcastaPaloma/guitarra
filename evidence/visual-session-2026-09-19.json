@@ -1,0 +1,61 @@
+{
+  "run": "idle-baseline-02",
+  "utc_started": "2026-09-19T05:50:54.236480+00:00",
+  "observed_duration_s": 12,
+  "encoded_frames": 360,
+  "telemetry_samples": 69,
+  "http_rtt_s": {
+    "median": 0.026260666,
+    "max": 0.197804666
+  },
+  "camera_pts_to_log_receipt_s": {
+    "median": 0.06330966596853038,
+    "min": 0.05411333300249632,
+    "max": 0.1287079579778947
+  },
+  "timing_limitations": [
+    "No physical camera/audio delay calibration",
+    "Camera PTS clock equivalence is an unverified assumption; receipt differences are diagnostic only",
+    "Encoder capture timestamps unavailable",
+    "No music reference or new motor commands in idle baseline"
+  ],
+  "pose_ranges_normalized": {
+    "base_pitch": [
+      -76.35312664214399,
+      -53.02154492905938
+    ],
+    "base_yaw": [
+      -3.46756152125279,
+      0.0
+    ],
+    "elbow_pitch": [
+      -96.13466334164589,
+      -81.4214463840399
+    ],
+    "wrist_pitch": [
+      -17.117117117117118,
+      -16.316316316316318
+    ],
+    "wrist_roll": [
+      -16.971279373368148,
+      15.300261096605738
+    ]
+  },
+  "camera_mirrored": false,
+  "new_motion_commands_sent": 0,
+  "new_style_hardware_runs": 0,
+  "physical_ab_pairs": 0,
+  "software_regression_tests_passed": 23,
+  "candidate_duration_s": 40,
+  "software_artifacts": {
+    "restrained": "7a64532a1a930d43c96adb6b9f536f7c21c1ebea39430468347f1bcbe11eee71",
+    "accented_phase_0": "cb053492f57f4de58d2b76e0c85570689ffe673e169bdae7ba0e0a41a6a7887a",
+    "accented_phase_1": "47d11433e57fa4bd3bd292bac691ca19bb2b202b97cd8ab3bc98b4885e529c40"
+  },
+  "final_read_only_status": {
+    "idle_playing": true,
+    "idle_paused": false,
+    "torque_enabled": true,
+    "last_error": null
+  }
+}

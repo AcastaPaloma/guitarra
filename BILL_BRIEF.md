@@ -24,8 +24,8 @@ New abilities become registered actions: `groove`, `look_at_guitar`, `say`, `sin
 
 - Five axes: base turn, lower-arm tilt, elbow, head roll, and head pitch. Commands use **-100 to 100 values, not degrees**.
 - **21 physical trials** covered every axis, three yaw speeds, and coordinated sway. Yaw/roll were promising for precise accents. The loaded elbow missed targets by roughly 6–8 units in this pose.
-- “OK” arrives before movement finishes. The band needs measured completion and a scheduled-start extension to the existing guarded runtime.
-- Normal idle was restored. Visual naturalness still needs the laptop camera view.
+- Dashboard “OK” arrives before movement finishes. The new SDK adapter waits for terminal execution results; physical tracking and synchronized starts still need measurement.
+- Normal idle was restored after the earlier trials. A later laptop-camera recording captured existing idle, but the new choreography has not run on hardware.
 
 ## What needs fixing before a show
 
@@ -39,11 +39,20 @@ Use prepared singing audio and separately generated banter. A reliable PA carrie
 
 The lamp cues a solo, faces the guitar, gives it space, celebrates its final phrase, then leads a shared downbeat. Crowd reactions happen at musical boundaries. Stillness and anticipation matter as much as dancing.
 
-Duet video references are linked in the architecture; playback retrieval was blocked, so visual study remains pending.
+Four duet references and a full-body dance reference were played in Chrome and
+sampled visually. The candidate maps dance across all five axes: turn, waist
+pulse, opposing elbow motion, roll and smaller head accents. Two 40-second styles
+and controlled phase/support comparisons compile, with 23 regression checks
+passing. This is implemented software, not a physically verified dance improvement.
 
 ## Recommended next step
 
-**Commission lamp camera/audio and build a reliable gesture harness.** Rehearse one short song scene with a simulated guitar, connect the real arms, then expand to five songs with recovery from network/model failures.
+**Commission the SDK/audio and physically compare the prepared gestures.** The
+runtime restarted during inspection and another change to its lighting profile
+appeared; exclusive trial control remains unresolved. Once coordinated, verify
+the camera view and stage directions, run small A/B trials, then rehearse both
+40-second scenes. Physical results and exact replay commands are tracked in
+[VISUAL_FINDINGS.md](VISUAL_FINDINGS.md) and [REHEARSAL.md](REHEARSAL.md).
 
 Candidates: *Seven Nation Army*, *Country Roads*, *Stand by Me*, *Jolene*, and *Billie Jean*. Song/version choices are pending; none is ready yet.
 

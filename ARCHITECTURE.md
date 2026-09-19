@@ -1,6 +1,6 @@
 # Guitarra: lamp frontperson and robotic guitarist
 
-Status: proposed architecture, grounded in live lamp experiments on **2026-09-19 UTC**. The performance harness is not implemented yet. This first step covers hardware reconnaissance, physical movement trials, interface design, and a build plan for discussion.
+Status: proposed band architecture, grounded in live lamp experiments on **2026-09-19 UTC**, with a new **software-tested performance candidate**. The five-axis composer, two 40-second presets, SDK lifecycle adapter and rehearsal tools now exist. Their physical A/B verification is blocked by missing SDK authentication configuration and unresolved concurrent runtime control; no new dance has been demonstrated. See [VISUAL_FINDINGS.md](VISUAL_FINDINGS.md) and [REHEARSAL.md](REHEARSAL.md).
 
 The lamp is the bandleader: it listens, introduces songs, sings through the audio system, dances, acknowledges the crowd, and gives the guitarist the spotlight. The guitar unit owns both instrument arms. A master Astra makes musical and social decisions; two specialist controllers prepare the lamp and guitar parts. **A shared musical transport and local deterministic executors provide timing.** Model response latency must never determine a strum or a beat accent.
 
@@ -31,7 +31,7 @@ Evidence labels in this document:
 | Camera | Innomaker USB camera connected; snapshot retrieved | Measured; image is substantially occluded/overexposed, unsuitable for audience interpretation as positioned |
 | Vision inference | `/api/perception/status` says unavailable/disabled | Measured; camera availability is separate from perception readiness |
 | Conversation | Chat configured enabled but not running; conversation gate disabled | Measured |
-| External view | User has a laptop camera aimed at the lamp | User report; no reachable camera stream supplied during these trials |
+| External view | Laptop AVFoundation camera reached; one valid 12-second existing-idle recording | Later visual session, 360 frames; no synchronized beat or new choreography trial |
 
 There is no verified singing, speech playback, clap detector, directional audience attention, or guitar connection in this session. Those are integration tasks, not existing demo capabilities.
 
@@ -105,7 +105,7 @@ Errors are measured minus requested, in normalized units. During the full-pose t
 
 For the +6 yaw trials, outbound error was about -0.97 units at all three requested durations. Return error was +0.45 to +0.67. In the gesture series, HTTP acknowledgments took about **3.6–13.1 ms**. For the 0.5-second yaw moves, feedback first came within 0.3 units of the eventual endpoint at about **0.64 seconds**. This small, coarsely sampled set is not a latency distribution or a general compensation constant.
 
-Coordinated sway completed with yaw error up to 1.09 units and roll error up to 0.81; head-pitch error reached 2.80. That establishes executable coordinated motion, **not** a visually verified natural dance. No external view was available. The laptop camera would materially improve that judgment.
+Coordinated sway completed with yaw error up to 1.09 units and roll error up to 0.81; head-pitch error reached 2.80. That establishes executable coordinated motion, **not** a visually verified natural dance. No external view was available during those 21 trials. The later camera session recorded existing idle, not a replay of those trials; it does not retroactively verify their naturalness.
 
 After testing, the normal `idle` animation was restored and verified playing with `idle_paused: false`; torque remained enabled. Runtime source, gains, and calibration were unchanged.
 
@@ -419,7 +419,7 @@ Genre presets change groove period, accent placement, motion amplitude, head/bod
 
 ### Performance reference shortlist
 
-The following performances were located through web research. YouTube metadata was accessible, but attempts to retrieve all four videos returned HTTP 403. **No continuous video/frame study was completed here.** Treat this as a viewing checklist for a subsequent visual session, without invented timestamps or measured performer motion.
+The reconnaissance initially reached metadata only. In the later visual session, all four references played in **Chrome** and representative paused/playback screenshots were inspected. A fifth full-body dance reference was added following the user's request for five-axis coordination. Exact timestamps and limits are in [VISUAL_FINDINGS.md](VISUAL_FINDINGS.md). These are sparse visual observations, not measured performer kinematics or audio timing.
 
 | Reference | What to examine and translate |
 |---|---|
@@ -488,19 +488,20 @@ guitarra/
   ARCHITECTURE.md
   BILL_BRIEF.md
   evidence/                   # this reconnaissance's motion measurements
-  band/                       # proposed below; not implemented
+  band/                       # partial implementation; other areas remain proposed
     protocol/                 # schemas, versioning, IDs, clock mapping
     conductor/                # show state, scheduler, transactions, watchdog
     policies/                 # master/lamp/guitar Astra contexts
     actions/                  # registry, schemas, validators, compilers
     adapters/
-      lamp/                   # existing LeLamp SDK + scheduled runtime bridge
+      lamp/                   # implemented SDK lifecycle client; scheduling remains proposed
       guitar/                 # one unit, two arms, physical calibration
       simulated/              # identical protocol for hardware-free work
     perception/               # audience events, transcript, DOA, optional vision
     audio/                    # transport, vocals, backing, routing/reference
     songs/                    # manifests and content-addressed prepared assets
-    performance/              # gesture/style libraries and composition
+    performance/              # implemented candidate gestures, styles and composition
+    rehearsal/                # implemented compile/capture/supervised-execution tools
     recording/                # event logs and deterministic replay
     operator/                 # readiness, selection, hold, stop, fault display
   tests/                      # meaningful timing, retry, fault and schema tests
@@ -510,7 +511,10 @@ Keep the existing runtime in its own repository. Implement a minimal reviewed ex
 
 ## 11. Build order and acceptance gates
 
-This reconnaissance is step 1. Subsequent work is proposed for agreement with the team.
+Reconnaissance completed step 1. Camera access and software candidates now cover
+parts of steps 2–4, but no later physical acceptance gate is complete. The narrow
+rehearsal candidate is 40 seconds with simulated guitar/audience cues; singing,
+shared audio transport, exclusive ownership and physical improvement remain unverified.
 
 | Stage | Concrete deliverable | Gate before moving on |
 |---|---|---|
@@ -527,7 +531,7 @@ Useful demo gates: no unintended replay from duplicate messages; no stale comman
 ### Decisions for the next conversation
 
 1. Which five songs, versions, and excerpt lengths should we perfect?
-2. Can the laptop expose its external camera feed, and where are audience and guitar relative to the lamp?
+2. The laptop camera is accessible; where are audience and guitar relative to the lamp, and when is exclusive motion/service control available for A/B trials?
 3. Which physical speaker/PA and microphone array are available? Is a reliable shared PA acceptable for the lamp's voice?
 4. For the first build, choose the lamp commissioning + gesture harness; then bring in the guitar through the same protocol.
 5. Confirm the guitar's actual SO-100/SO-101 models, arm wiring, tuning, and intended fretting/picking mechanism when hardware becomes accessible.
