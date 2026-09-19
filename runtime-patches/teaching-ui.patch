@@ -46,7 +46,7 @@ index ad7e364..b7f4a62 100644
          </main>
        </div>
 diff --git a/apps/dashboard/frontend/src/api/dashboardClient.ts b/apps/dashboard/frontend/src/api/dashboardClient.ts
-index b786382..726d88c 100644
+index b786382..0fac057 100644
 --- a/apps/dashboard/frontend/src/api/dashboardClient.ts
 +++ b/apps/dashboard/frontend/src/api/dashboardClient.ts
 @@ -1,4 +1,5 @@
@@ -87,7 +87,7 @@ index b786382..726d88c 100644
    stopAnimation: () => postJson('/api/animations/stop'),
    deleteAnimation: (name: string) => postJson('/api/animations/delete', { name }),
    setIdleAnimation: (name: string | null) => postJson('/api/animations/idle', { name }),
-@@ -205,6 +215,17 @@ export const dashboardApi = {
+@@ -205,6 +215,18 @@ export const dashboardApi = {
    getRecordingStatus: () => fetchJson<RecordingStatus>('/api/recording/status'),
    startRecording: (name: string) => postJson<RecordingStatus>('/api/recording/start', { name }),
    stopRecording: () => postJson<RecordingStopResponse>('/api/recording/stop'),
@@ -96,9 +96,10 @@ index b786382..726d88c 100644
 +  getDanceCatalog: () => fetchJson<DanceCatalog>('/api/dances'),
 +  getDanceStatus: () => fetchJson<DanceStatus>('/api/dances/status'),
 +  prepareDance: (song_id: string, bpm: number, variation: number, beats?: number[]) => postJson<PreparedDance>('/api/animations/play', { dance: { operation: 'prepare', song_id, bpm, variation, ...(beats ? { beats } : {}) } }),
-+  startDance: (id: string, audio_mode: 'laptop_beat' | 'laptop_file' = 'laptop_beat') => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'start', id, audio_mode } }),
++  startDance: (id: string, audio_mode: 'laptop_beat' | 'laptop_file' | 'youtube' = 'laptop_beat') => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'start', id, audio_mode } }),
 +  danceHeartbeat: (id: string) => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'heartbeat', id } }),
 +  confirmDanceAudio: (id: string, start_at: number) => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'audio_ready', id, start_at } }),
++  syncDanceYouTube: (id: string, start_at: number, media_time: number) => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'youtube_ready', id, start_at, media_time } }),
 +  getTeachingNeutral: () => fetchJson<TeachingNeutral>('/api/recording/neutral'),
 +  saveTeachingNeutral: () => postJson<TeachingNeutral>('/api/recording/stop', { operation: 'save_neutral', restore_torque: false }),
 +  goToTeachingNeutral: () => postJson('/api/animations/play', { name: 'teaching_neutral', teaching: true }),
@@ -154,13 +155,14 @@ index ceaabd9..d005474 100644
  }
 diff --git a/apps/dashboard/frontend/src/api/types/dancing.ts b/apps/dashboard/frontend/src/api/types/dancing.ts
 new file mode 100644
-index 0000000..08ba0c3
+index 0000000..b8f9eee
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/api/types/dancing.ts
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,18 @@
 +export interface DanceSong {
 +  id: string; title: string; artist: string; genre: string; bpm: number; meter: number;
 +  mood: string; color: string; source: string;
++  youtube_id?: string;
 +}
 +export interface DanceCue {
 +  name: string; role: string; start: number; end: number; action_start: number; action_end: number;
@@ -172,7 +174,7 @@ index 0000000..08ba0c3
 +  frames: number; neutral_hold_seconds: number; preview: Array<{ t: number; positions: Record<string, number> }>;
 +}
 +export interface PreparedDance { id: string; expires_in: number; report: DanceReport }
-+export interface DanceStatus { version: number; server_time: number; id?: string | null; song_id?: string | null; state?: string | null; start_at?: number | null; ended_at?: number | null; error?: string | null; audio_ready?: boolean; audio_mode?: string; safety_latched?: boolean }
++export interface DanceStatus { version: number; server_time: number; id?: string | null; song_id?: string | null; state?: string | null; start_at?: number | null; ended_at?: number | null; error?: string | null; audio_ready?: boolean; audio_mode?: string; safety_latched?: boolean; media_time?: number | null }
 +export interface DanceCatalog { version: number; songs: DanceSong[]; neutral_valid: boolean; error?: string; safety_latched?: boolean;
 +  actions: Array<{ name: string; role: string; max_speed: number; window: number[] }>; }
 diff --git a/apps/dashboard/frontend/src/api/types/index.ts b/apps/dashboard/frontend/src/api/types/index.ts
@@ -186,10 +188,10 @@ index 870421a..3dc486d 100644
  export * from './bluetooth';
 diff --git a/apps/dashboard/frontend/src/styles/features/dancing.css b/apps/dashboard/frontend/src/styles/features/dancing.css
 new file mode 100644
-index 0000000..c3b0899
+index 0000000..dff7807
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/styles/features/dancing.css
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,87 @@
 +.dance-view { max-width: 1260px; margin: 0 auto; padding: 16px 8px 30px; --dance-accent: #f5b455; }
 +.dance-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
 +.dance-eyebrow, .dance-section-label { font-size: 10px; font-weight: 650; letter-spacing: .16em; color: var(--muted); }
@@ -242,6 +244,14 @@ index 0000000..c3b0899
 +.dance-audio input[type=file] { display: none; }
 +.dance-analysis { font-size: 10px; color: var(--soft); line-height: 1.6; margin: 9px 0 25px; }
 +.dance-analysis a { color: var(--muted); text-decoration: none; white-space: nowrap; }
++.dance-soundtrack { margin-bottom: 12px; font-size: 12px; color: var(--muted); }
++.dance-soundtrack select { margin-left: 12px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
++.dance-youtube { margin-bottom: 16px; }
++.dance-youtube-player { min-height: 225px; aspect-ratio: 16 / 9; background: #080808; }
++.dance-youtube-player iframe { display: block; width: 100%; height: 100%; min-height: 225px; border: 0; }
++.dance-youtube p { font-size: 11px; line-height: 1.6; color: var(--muted); }
++.dance-video-link { display: flex; gap: 8px; }
++.dance-video-link input { min-width: 0; flex: 1; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 +.dance-timeline { position: relative; height: 55px; background: #0000002a; border-radius: 7px; overflow: hidden; }
 +.dance-timeline > div { position: absolute; top: 0; height: 100%; padding: 11px 9px; box-sizing: border-box; border-right: 2px solid var(--panel); background: color-mix(in srgb, var(--dance-accent) 12%, transparent); display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
 +.dance-timeline > div.current { background: color-mix(in srgb, var(--dance-accent) 30%, transparent); }
@@ -494,6 +504,151 @@ index 0000000..dd12f49
 +
 +  close() { this.stop(); void this.context?.close(); this.context = null; }
 +}
+diff --git a/apps/dashboard/frontend/src/utils/danceYouTube.ts b/apps/dashboard/frontend/src/utils/danceYouTube.ts
+new file mode 100644
+index 0000000..01c7305
+--- /dev/null
++++ b/apps/dashboard/frontend/src/utils/danceYouTube.ts
+@@ -0,0 +1,139 @@
++/** Visible official YouTube embed; no downloading, audio extraction or ad bypass. */
++interface Player {
++  playVideo(): void; pauseVideo(): void; seekTo(seconds: number, allowSeekAhead: boolean): void;
++  setVolume(volume: number): void; unMute(): void; isMuted(): boolean; getVolume(): number;
++  setPlaybackRate(rate: number): void; getPlaybackRate(): number;
++  getPlayerState(): number; getCurrentTime(): number; getDuration(): number; getVideoUrl(): string;
++  destroy(): void;
++}
++interface YouTubeAPI { Player: new (element: HTMLElement, options: { events: Record<string, (event: { data: number }) => void> }) => Player }
++declare global { interface Window { YT?: YouTubeAPI; onYouTubeIframeAPIReady?: () => void } }
++let loading: Promise<YouTubeAPI> | null = null;
++
++export function parseYouTubeId(value: string): string {
++  const text = value.trim();
++  if (/^[\w-]{11}$/.test(text)) return text;
++  try {
++    const url = new URL(text);
++    if (!['https:', 'http:'].includes(url.protocol)) throw new Error();
++    const host = url.hostname.replace(/^www\.|^m\./, '');
++    const id = host === 'youtu.be' ? url.pathname.slice(1) : ['youtube.com', 'youtube-nocookie.com'].includes(host)
++      ? (url.searchParams.get('v') || url.pathname.match(/^\/(?:embed|shorts)\/([\w-]{11})$/)?.[1]) : '';
++    if (id && /^[\w-]{11}$/.test(id)) return id;
++  } catch { /* only YouTube URLs and exact IDs are accepted */ }
++  throw new Error('Paste a YouTube video link or its 11-character video ID');
++}
++
++export function nextVideoBeat(mediaTime: number, firstBeat: number, bpm: number, meter: number, serverNow: number) {
++  if (![mediaTime, firstBeat, bpm, meter, serverNow].every(Number.isFinite) || mediaTime < 0 || firstBeat < 0 || bpm < 50 || bpm > 200 || ![4, 5].includes(meter)) throw new Error('Invalid video beat timing');
++  const bar = 60 / bpm * meter;
++  const mediaStart = firstBeat + Math.max(0, Math.ceil((mediaTime + 1.5 - firstBeat) / bar)) * bar;
++  return { start_at: serverNow + mediaStart - mediaTime, media_time: mediaStart };
++}
++
++export function videoDrift(mediaTime: number, mediaStart: number, serverNow: number, startAt: number) {
++  return mediaTime - (mediaStart + serverNow - startAt);
++}
++
++function loadAPI(): Promise<YouTubeAPI> {
++  if (window.YT?.Player) return Promise.resolve(window.YT);
++  if (loading) return loading;
++  loading = new Promise((resolve, reject) => {
++    const script = document.createElement('script');
++    const previous = window.onYouTubeIframeAPIReady;
++    const timer = setTimeout(() => fail(), 12000);
++    const fail = () => { clearTimeout(timer); script.remove(); loading = null; reject(new Error('YouTube could not load. Check your connection/content blocker, then reload this tab.')); };
++    window.onYouTubeIframeAPIReady = () => { previous?.(); clearTimeout(timer); if (window.YT?.Player) resolve(window.YT); else fail(); };
++    script.src = 'https://www.youtube.com/iframe_api'; script.async = true;
++    script.onerror = fail; document.head.appendChild(script);
++  });
++  return loading;
++}
++
++export class DanceYouTube {
++  private player: Player | null = null;
++  private dead = false;
++  private isReady = false;
++  private failure = '';
++  private attempt = 0;
++  private watching = false;
++  private progress: { media: number; wall: number } | null = null;
++  private interrupt: (message: string) => void;
++  private readyTimer: ReturnType<typeof setTimeout> | undefined;
++  readonly videoId: string;
++  readonly ready: Promise<void>;
++
++  constructor(container: HTMLElement, videoId: string, onInterrupt: (message: string) => void) {
++    this.videoId = videoId;
++    this.interrupt = onInterrupt;
++    this.ready = loadAPI().then(api => new Promise<void>((resolve, reject) => {
++      if (this.dead) { resolve(); return; }
++      // The dashboard uses Referrer-Policy: same-origin. Override only this
++      // iframe before its first navigation, supplying YouTube's required origin.
++      const frame = document.createElement('iframe');
++      const params = new URLSearchParams({ enablejsapi: '1', origin: window.location.origin, playsinline: '1', controls: '1', rel: '0' });
++      frame.referrerPolicy = 'strict-origin-when-cross-origin';
++      frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
++      frame.title = 'YouTube dance soundtrack'; frame.allowFullscreen = true;
++      frame.src = `https://www.youtube-nocookie.com/embed/${parseYouTubeId(videoId)}?${params}`;
++      container.replaceChildren(frame);
++      const timer = this.readyTimer = setTimeout(() => reject(new Error('YouTube player did not become ready. Reload or choose another video.')), 12000);
++      const failed = (message: string) => {
++        this.failure = message; clearTimeout(timer); reject(new Error(message));
++        if (this.watching) this.interrupt(message);
++      };
++      this.player = new api.Player(frame, { events: {
++        onReady: () => { this.isReady = true; clearTimeout(timer); resolve(); },
++        onError: event => failed(`YouTube cannot play this video (error ${event.data}). Choose another link; no dance will start.`),
++        onAutoplayBlocked: () => failed('YouTube blocked playback. Click Play inside the video, then try Start again.'),
++        onStateChange: event => {
++          if (this.watching && event.data !== 1) this.interrupt('YouTube paused, buffered or ended. Dance stopped; prepare again.');
++        },
++        onPlaybackRateChange: event => { if (this.watching && event.data !== 1) this.interrupt('YouTube playback speed changed. Dance stopped.'); },
++      } });
++    }));
++  }
++
++  get time() { return this.isReady ? this.player?.getCurrentTime() ?? 0 : 0; }
++  get duration() { return this.isReady ? this.player?.getDuration() ?? 0 : 0; }
++  setVolume(volume: number) { if (this.isReady) this.player?.setVolume(volume); }
++
++  /** Called directly by a click, before awaiting any network/motor operation. */
++  async begin(offset: number, volume: number) {
++    if (!this.player || this.dead || !this.isReady) throw new Error('Wait for the YouTube player to load');
++    if (!Number.isFinite(offset) || offset < 0 || volume <= 0) throw new Error('Choose a valid video start and turn up laptop volume');
++    this.watching = false; this.failure = ''; this.progress = null;
++    const attempt = ++this.attempt, player = this.player;
++    player.setPlaybackRate(1); player.setVolume(volume); player.unMute();
++    player.seekTo(offset, true); player.playVideo();
++    const deadline = performance.now() + 15000;
++    let sample: { media: number; wall: number } | null = null;
++    while (performance.now() < deadline) {
++      if (this.dead || attempt !== this.attempt) throw new Error('Video start cancelled');
++      if (this.failure) throw new Error(this.failure);
++      const media = player.getCurrentTime(), wall = performance.now();
++      if (player.getPlayerState() === 1 && media >= Math.max(0, offset - .3) && media < offset + 3 && player.getDuration() - media >= 40) {
++        if (sample && wall - sample.wall >= 300 && Math.abs((media - sample.media) - (wall - sample.wall) / 1000) < .15) {
++          this.progress = { media, wall }; return;
++        }
++        if (!sample) sample = { media, wall };
++      } else sample = null;
++      await new Promise(resolve => setTimeout(resolve, 50));
++    }
++    throw new Error('YouTube is not playing the selected song yet. Finish any ad/sign-in, click Play in the video, then retry. Choose an earlier start if less than 40 seconds remain.');
++  }
++
++  watch() { this.watching = true; }
++  assertHealthy() {
++    const p = this.player;
++    if (!p || !this.isReady || this.failure) throw new Error(this.failure || 'YouTube player unavailable');
++    if (p.getPlayerState() !== 1 || p.getPlaybackRate() !== 1 || p.isMuted() || p.getVolume() <= 0) throw new Error('YouTube paused, buffered, muted or changed speed. Dance stopped.');
++    if (parseYouTubeId(p.getVideoUrl()) !== this.videoId) throw new Error('YouTube video changed. Dance stopped.');
++    const media = p.getCurrentTime(), wall = performance.now();
++    if (!Number.isFinite(media)) throw new Error('YouTube timing unavailable');
++    if (this.progress && wall - this.progress.wall > 700 && media - this.progress.media < .1) throw new Error('YouTube playback stalled. Dance stopped.');
++    if (!this.progress || media - this.progress.media > .1) this.progress = { media, wall };
++  }
++  pause() { this.watching = false; this.attempt++; if (this.isReady) this.player?.pauseVideo(); }
++  destroy() { this.dead = true; this.watching = false; this.attempt++; clearTimeout(this.readyTimer); this.player?.destroy(); this.player = null; }
++}
 diff --git a/apps/dashboard/frontend/src/utils/teaching.ts b/apps/dashboard/frontend/src/utils/teaching.ts
 new file mode 100644
 index 0000000..99eaa89
@@ -519,19 +674,20 @@ index 0000000..99eaa89
 +}
 diff --git a/apps/dashboard/frontend/src/views/DancingView.tsx b/apps/dashboard/frontend/src/views/DancingView.tsx
 new file mode 100644
-index 0000000..208ec9f
+index 0000000..d3a975d
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/views/DancingView.tsx
-@@ -0,0 +1,335 @@
+@@ -0,0 +1,405 @@
 +import { useCallback, useEffect, useRef, useState } from 'react';
 +import { AudioLines, Check, Disc3, FileAudio, Music2, Play, RefreshCw, Shuffle, Square } from 'lucide-react';
 +import { dashboardApi, errorMessage, ApiError } from '../api/dashboardClient';
 +import type { DanceCatalog, DanceSong, DanceStatus, PreparedDance } from '../api/types';
 +import { analyzeBeats, DanceAudio } from '../utils/danceAudio';
++import { DanceYouTube, nextVideoBeat, parseYouTubeId, videoDrift } from '../utils/danceYouTube';
 +import { useInterval } from '../hooks/useInterval';
 +import presets from '../../../../../static/dances/catalog.json';
 +
-+const ACTIVE = ['preparing', 'to_neutral', 'countdown', 'playing', 'finishing', 'stopping'];
++const ACTIVE = ['preparing', 'to_neutral', 'waiting_audio', 'countdown', 'playing', 'finishing', 'stopping'];
 +const AXES = [['base_yaw', 'Turn', '#f5b455'], ['base_pitch', 'Lean', '#88bbf2'], ['elbow_pitch', 'Lift', '#bd8bff'], ['wrist_roll', 'Roll', '#78dfca'], ['wrist_pitch', 'Nod', '#f18b86']];
 +type AttachedAudio = { buffer: AudioBuffer; name: string };
 +
@@ -554,12 +710,21 @@ index 0000000..208ec9f
 +  const [volume, setVolume] = useState(60);
 +  const [audioStatus, setAudioStatus] = useState('Audio output: this laptop');
 +  const [speakerStatus, setSpeakerStatus] = useState('Checking lamp speaker…');
++  const [useYouTube, setUseYouTube] = useState(true);
++  const [videoId, setVideoId] = useState(presets[0].youtube_id);
++  const [videoLink, setVideoLink] = useState(`https://www.youtube.com/watch?v=${presets[0].youtube_id}`);
++  const [videoReady, setVideoReady] = useState(false);
++  const [videoMessage, setVideoMessage] = useState('Loading YouTube…');
++  const videoContainer = useRef<HTMLDivElement>(null);
++  const youtube = useRef<DanceYouTube | null>(null);
++  const videoInterrupt = useRef<(message: string) => void>(() => {});
++  const videoAnchor = useRef<{ start_at: number; media_time: number } | null>(null);
 +  const engine = useRef<DanceAudio | null>(null);
 +  const buffers = useRef(new Map<string, AttachedAudio>());
 +  const ownedRun = useRef<string | null>(null);
 +  const startingRun = useRef(false);
 +  const scheduled = useRef<string | null>(null);
-+  const playback = useRef<{ report: PreparedDance['report']; audio: AttachedAudio | null; offset: number } | null>(null);
++  const playback = useRef<{ report: PreparedDance['report']; audio: AttachedAudio | null; offset: number; youtube: boolean } | null>(null);
 +  const clockOffset = useRef(0);
 +  const clockRtt = useRef(Infinity);
 +  const mounted = useRef(true);
@@ -571,16 +736,19 @@ index 0000000..208ec9f
 +  const song = songs.find(s => s.id === songId) || songs[0];
 +  const active = Boolean(status?.state && ACTIVE.includes(status.state));
 +  const safetyLatched = status?.safety_latched ?? catalog?.safety_latched ?? false;
-+  const ready = programRunning && !needsUpdate && catalog?.version === 2 && catalog.neutral_valid && !safetyLatched;
++  const ready = programRunning && !needsUpdate && catalog?.version === 3 && catalog.neutral_valid && !safetyLatched;
 +
 +  const audio = () => engine.current || (engine.current = new DanceAudio());
 +  const stopSound = () => {
 +    engine.current?.stop();
++    youtube.current?.pause();
++    videoAnchor.current = null;
 +    if (previewTimer.current) clearTimeout(previewTimer.current);
 +    setHearing(false);
 +    setAudioStatus('Audio stopped · output: this laptop');
 +  };
 +  const stop = async () => {
++    generation.current++;
 +    stopSound();
 +    const stoppingId = ownedRun.current || status?.id;
 +    if (ownedRun.current) setPrepared(null);
@@ -593,12 +761,15 @@ index 0000000..208ec9f
 +    }
 +    catch (failure) { setError(`Stop request failed: ${errorMessage(failure)}. Connection loss also stops this dance's motor commands within 4 seconds.`); }
 +  };
++  videoInterrupt.current = message => {
++    if (ownedRun.current) { setError(message); void stop(); }
++  };
 +
 +  const refreshCatalog = useCallback(async () => {
 +    try {
 +      const result = await dashboardApi.getDanceCatalog();
 +      if (mounted.current) {
-+        if (result.version !== 2) { setCatalog(null); setNeedsUpdate(true); return; }
++        if (result.version !== 3) { setCatalog(null); setNeedsUpdate(true); return; }
 +        setCatalog(result); setNeedsUpdate(false); setError('');
 +      }
 +    } catch (failure) {
@@ -617,6 +788,14 @@ index 0000000..208ec9f
 +    const pollingOwner = ownedRun.current;
 +    const sent = Date.now();
 +    try {
++      if (pollingOwner && playback.current?.youtube) {
++        const anchor = videoAnchor.current;
++        const serverNow = (Date.now() + clockOffset.current) / 1000;
++        if (!anchor || serverNow < anchor.start_at + 30) {
++          youtube.current?.assertHealthy();
++          if (anchor && Math.abs(videoDrift(youtube.current!.time, anchor.media_time, serverNow, anchor.start_at)) > .6) throw new Error('YouTube lost sync or was seeked. Dance stopped; prepare again.');
++        } else youtube.current?.pause();
++      }
 +      const result = pollingOwner
 +        ? await dashboardApi.danceHeartbeat(pollingOwner).catch(() => dashboardApi.getDanceStatus())
 +        : await dashboardApi.getDanceStatus();
@@ -636,7 +815,18 @@ index 0000000..208ec9f
 +        stopSound();
 +        setPrepared(null);
 +      }
-+      if (pollingOwner && result.id === pollingOwner && result.start_at && ['countdown', 'playing'].includes(result.state || '') && scheduled.current !== result.id) {
++      if (pollingOwner && result.id === pollingOwner && result.state === 'waiting_audio' && playback.current?.youtube && scheduled.current !== result.id) {
++        if (rtt > 500 || !youtube.current) throw new Error('Connection is too slow for YouTube synchronization');
++        youtube.current.assertHealthy();
++        const selected = playback.current;
++        const anchor = nextVideoBeat(youtube.current.time, selected.offset, selected.report.bpm, selected.report.meter, (Date.now() + clockOffset.current) / 1000);
++        if (anchor.media_time + 30 > youtube.current.duration) throw new Error('Choose an earlier video start; need 30 seconds after neutral entry');
++        const armed = await dashboardApi.syncDanceYouTube(pollingOwner, anchor.start_at, anchor.media_time);
++        if (ownedRun.current !== pollingOwner) return;
++        videoAnchor.current = anchor; scheduled.current = result.id; setStatus(armed);
++        setAudioStatus('YouTube synced · sound on this laptop');
++      }
++      if (pollingOwner && !playback.current?.youtube && result.id === pollingOwner && result.start_at && ['countdown', 'playing'].includes(result.state || '') && scheduled.current !== result.id) {
 +        const selected = playback.current;
 +        if (!selected) throw new Error('Playback preview is unavailable');
 +        if (rtt > 700) throw new Error('Connection is too slow for a synchronized start');
@@ -650,7 +840,7 @@ index 0000000..208ec9f
 +        setAudioStatus(`${selected.audio ? 'Song excerpt' : 'Beat track'} scheduled on this laptop`);
 +      }
 +      if (pollingOwner && result.id === pollingOwner && ['playing', 'finishing'].includes(result.state || '')) {
-+        if (result.state === 'playing' && !audio().isRunning) throw new Error('Browser audio stopped. Dance cancelled; enable sound before retrying.');
++        if (!playback.current?.youtube && result.state === 'playing' && !audio().isRunning) throw new Error('Browser audio stopped. Dance cancelled; enable sound before retrying.');
 +        if (result.start_at && Date.now() + clockOffset.current > (result.start_at + 35) * 1000) {
 +          throw new Error('Dance completion was not confirmed. Playback stopped; prepare again.');
 +        }
@@ -684,6 +874,16 @@ index 0000000..208ec9f
 +    };
 +  }, [refreshCatalog]);
 +  useEffect(() => { if (programRunning) void refreshCatalog(); }, [programRunning, refreshCatalog]);
++  useEffect(() => {
++    if (!useYouTube || !videoContainer.current) return;
++    let gone = false;
++    setVideoReady(false); setVideoMessage('Loading YouTube…');
++    const player = new DanceYouTube(videoContainer.current, videoId, message => videoInterrupt.current(message));
++    youtube.current = player;
++    player.ready.then(() => { if (!gone) { setVideoReady(true); setVideoMessage('YouTube ready · sound plays on this laptop'); } })
++      .catch(failure => { if (!gone) setVideoMessage(errorMessage(failure)); });
++    return () => { gone = true; player.destroy(); if (youtube.current === player) youtube.current = null; };
++  }, [useYouTube, videoId]);
 +  const checkSpeaker = async () => {
 +    try {
 +      const result = await dashboardApi.getAudioOutputDevices();
@@ -700,7 +900,7 @@ index 0000000..208ec9f
 +  useInterval(poll, programRunning && !needsUpdate ? 500 : null);
 +  useInterval(() => setNow(Date.now()), active ? 100 : null);
 +  useEffect(() => {
-+    const hidden = () => { if (document.hidden && ownedRun.current) void stop(); };
++    const hidden = () => { if (document.hidden && (ownedRun.current || startingRun.current)) void stop(); };
 +    document.addEventListener('visibilitychange', hidden);
 +    return () => document.removeEventListener('visibilitychange', hidden);
 +  });
@@ -716,6 +916,8 @@ index 0000000..208ec9f
 +    invalidate(); setSongId(next.id); setBpm(next.bpm); setVariation(0); setOffset(0); setBeats(undefined);
 +    setAnalysis('Nominal song tempo · attach audio to estimate its actual beats');
 +    setAttachment(buffers.current.get(next.id) || null); setError('');
++    const id = next.youtube_id || presets.find(p => p.id === next.id)!.youtube_id;
++    setVideoId(id); setVideoLink(`https://www.youtube.com/watch?v=${id}`);
 +  };
 +  const prepare = (nextVariation = variation) => run('Checking dance', async () => {
 +    stopSound();
@@ -725,19 +927,28 @@ index 0000000..208ec9f
 +  });
 +  const start = () => run('Starting dance', async () => {
 +    if (!prepared || !ready) throw new Error('Prepare a dance and save neutral first');
-+    await audio().unlock();
 +    if (volume <= 0) throw new Error('Turn up laptop audio before starting the dance');
-+    if (!mounted.current) return;
 +    stopSound();
-+    playback.current = { report: prepared.report, audio: attachment, offset };
++    const version = generation.current;
++    playback.current = { report: prepared.report, audio: attachment, offset, youtube: useYouTube };
 +    startingRun.current = true;
-+    ownedRun.current = prepared.id; scheduled.current = null;
 +    try {
++      if (useYouTube) {
++        if (!youtube.current || !videoReady) throw new Error('Wait for YouTube to load');
++        setAudioStatus('Starting YouTube · waiting for the song before moving');
++        await youtube.current.begin(offset, volume);
++        youtube.current.assertHealthy();
++      } else await audio().unlock();
++      if (!mounted.current || version !== generation.current) return;
++      if (document.hidden) throw new Error('Keep this tab visible before starting the dance');
++      ownedRun.current = prepared.id; scheduled.current = null;
++      if (useYouTube) youtube.current?.watch();
 +      await dashboardApi.setIdleAnimation(null);
 +      if (!mounted.current || ownedRun.current !== prepared.id) return;
-+      const result = await dashboardApi.startDance(prepared.id, attachment ? 'laptop_file' : 'laptop_beat');
++      const result = await dashboardApi.startDance(prepared.id, useYouTube ? 'youtube' : attachment ? 'laptop_file' : 'laptop_beat');
++      if (!mounted.current || ownedRun.current !== prepared.id) { void dashboardApi.stopAnimation().catch(() => {}); return; }
 +      setStatus(result);
-+    } catch (failure) { await stop(); throw failure; }
++    } catch (failure) { if (ownedRun.current) await stop(); else stopSound(); throw failure; }
 +    finally { startingRun.current = false; }
 +  });
 +  const attach = (file: File) => run('Reading audio', async () => {
@@ -762,6 +973,12 @@ index 0000000..208ec9f
 +  const hear = () => run('Starting audio', async () => {
 +    if (hearing) { stopSound(); return; }
 +    if (!prepared) throw new Error('Prepare the dance first');
++    if (useYouTube) {
++      if (!youtube.current || !videoReady) throw new Error('Wait for YouTube to load');
++      await youtube.current.begin(offset, volume);
++      setAudioStatus('YouTube preview · no motor movement');
++      setHearing(true); previewTimer.current = setTimeout(stopSound, 30000); return;
++    }
 +    await audio().unlock();
 +    audio().setVolume(volume / 100);
 +    audio().schedule(.2, prepared.report.beats, song.meter, attachment?.buffer, offset);
@@ -793,6 +1010,7 @@ index 0000000..208ec9f
 +  const currentCue = report?.cues.find(cue => cue.start <= elapsed && cue.end > elapsed);
 +  const locked = active || Boolean(busy);
 +  const stateLabel = status?.state === 'to_neutral' ? 'Going to neutral' : status?.state === 'countdown' ? `Starting in ${countdown.toFixed(1)}s`
++    : status?.state === 'waiting_audio' ? 'Syncing to YouTube'
 +    : status?.state === 'playing' ? 'Dancing' : status?.state === 'preparing' ? 'Checking entry'
 +    : status?.state === 'finishing' ? 'Checking final neutral' : status?.state === 'stopping' ? 'Stopping'
 +    : prepared ? 'Ready to dance' : status?.state === 'completed' ? 'Complete · back at neutral'
@@ -800,7 +1018,7 @@ index 0000000..208ec9f
 +
 +  return <div className="dance-view" style={{ '--dance-accent': song.color } as React.CSSProperties}>
 +    <header className="dance-heading"><div><span className="dance-eyebrow">THE LAMP SESSIONS · VOL. 01</span><h1>Small lamp. Big moves.</h1><p>Five songs. Your moves. A different groove every time.</p></div><span className={`dance-live ${active ? 'active' : ''}`}><span />{stateLabel}</span></header>
-+    {(needsUpdate || !programRunning) && <div className="teaching-notice">Load the dance reliability update before playback. Support the head and arms first; restarting can release motor holding.<button className="btn" disabled={Boolean(busy)} onClick={loadUpdate}>Load dance update</button></div>}
++    {(needsUpdate || !programRunning) && <div className="teaching-notice">Load the YouTube dance update before playback. Support the head and arms first; restarting can release motor holding.<button className="btn" disabled={Boolean(busy)} onClick={loadUpdate}>Load dance update</button></div>}
 +    {safetyLatched && <div className="teaching-error" role="alert">Emergency stop is latched. Motor power stays off. Inspect and support the lamp, then clear the stop explicitly in Controls before dancing.</div>}
 +    {catalog && !catalog.neutral_valid && <div className="teaching-notice">Save a neutral standing pose in Teach before dancing.<button className="btn" disabled={locked} onClick={() => void refreshCatalog()}><RefreshCw size={15} />Check again</button></div>}
 +    {(error || catalog?.error) && <div className="teaching-error" role="alert">{error || catalog?.error}</div>}
@@ -818,20 +1036,27 @@ index 0000000..208ec9f
 +        <div className="dance-hero"><div><span className="dance-eyebrow">{song.genre.toUpperCase()} / {song.meter}:4</span><h2>{song.title}</h2><p>{song.mood}</p></div><div className={`dance-vinyl ${status?.state === 'playing' ? 'spinning' : ''}`}><Disc3 size={116} /><span>30<small>SEC</small></span></div></div>
 +        <div className="dance-settings">
 +          <label>Tempo <span className="dance-number"><input aria-label="Tempo BPM" type="number" min={50} max={200} step={.25} value={bpm} disabled={locked} onChange={e => { invalidate(); setBpm(Number(e.target.value)); setBeats(undefined); setAnalysis('Manual tempo grid'); }} /><small>BPM</small></span></label>
-+          <label>Excerpt start <span className="dance-number"><input aria-label="Excerpt start seconds" type="number" min={0} step={.1} value={Number(offset.toFixed(3))} disabled={locked || !attachment} onChange={e => { invalidate(); setOffset(Number(e.target.value)); setBeats(undefined); }} /><small>SEC</small></span></label>
++          <label>{useYouTube ? 'Video / first beat start' : 'Excerpt start'} <span className="dance-number"><input aria-label="Excerpt start seconds" type="number" min={0} step={.1} value={Number(offset.toFixed(3))} disabled={locked || (!useYouTube && !attachment)} onChange={e => { invalidate(); setOffset(Number(e.target.value)); setBeats(undefined); }} /><small>SEC</small></span></label>
 +          <div className="dance-meter"><span>Phrase</span><strong>{song.meter}/4</strong><small>{song.meter === 5 ? 'Three + two' : 'Four on the floor'}</small></div>
 +        </div>
-+        <div className="dance-audio"><div><FileAudio size={18} /><span><strong>{attachment ? attachment.name : 'No song file attached · beat track only'}</strong><small>{attachment ? 'Audio stays on this laptop. Never uploaded.' : 'Attach audio to hear the actual song. The preset supplies choreography and a metronome.'}</small></span></div>
++        <div className="dance-soundtrack"><label>Soundtrack <select aria-label="Soundtrack source" value={useYouTube ? 'youtube' : 'local'} disabled={locked} onChange={e => { invalidate(); setUseYouTube(e.target.value === 'youtube'); setOffset(0); setBeats(undefined); }}><option value="youtube">YouTube video</option><option value="local">Local file / beat track</option></select></label></div>
++        {useYouTube && <section className="dance-youtube" aria-label="YouTube soundtrack">
++          <div className="dance-youtube-player" ref={videoContainer} />
++          <p role="status">{videoMessage}</p>
++          <div className="dance-video-link"><input aria-label="YouTube video link" value={videoLink} disabled={locked} onChange={e => setVideoLink(e.target.value)} /><button className="btn" disabled={locked} onClick={() => { try { const id = parseYouTubeId(videoLink); invalidate(); setVideoId(id); setOffset(0); setBeats(undefined); setError(''); } catch (failure) { setError(errorMessage(failure)); } }}>Load video</button></div>
++          <p>Start plays the video, brings the lamp to neutral, then joins the next bar for 30 seconds. Pause, buffering or seeking stops the dance. Internet required.</p>
++        </section>}
++        {!useYouTube && <div className="dance-audio"><div><FileAudio size={18} /><span><strong>{attachment ? attachment.name : 'No song file attached · beat track only'}</strong><small>{attachment ? 'Audio stays on this laptop. Never uploaded.' : 'Attach audio to hear the actual song. The preset supplies choreography and a metronome.'}</small></span></div>
 +          <label className={`btn ${locked ? 'disabled' : ''}`}>Attach audio<input aria-label="Attach local song audio" type="file" accept="audio/*" disabled={locked} onChange={e => { const file = e.target.files?.[0]; if (file) void attach(file); e.target.value = ''; }} /></label>
 +          <button className="btn ghost" disabled={locked || !attachment} onClick={() => void analyze()}>Analyze beats</button>
 +          {attachment && <button className="btn ghost" disabled={locked} onClick={() => { invalidate(); buffers.current.delete(songId); setAttachment(null); setOffset(0); setBeats(undefined); setAnalysis('Manual tempo grid'); }}>Use beats</button>}
-+        </div>
++        </div>}
 +        <div className="dance-audio"><div><Music2 size={18} /><span><strong>{audioStatus}</strong><small>{speakerStatus}</small></span></div>
 +          <button className="btn" disabled={locked} onClick={() => void testAudio()}>Test laptop audio</button>
-+          <label>Laptop volume <input aria-label="Laptop audio volume" type="range" min={0} max={100} value={volume} onChange={e => { const value = Number(e.target.value); setVolume(value); audio().setVolume(value / 100); }} />{volume}%</label>
++          <label>Laptop volume <input aria-label="Laptop audio volume" type="range" min={0} max={100} value={volume} onChange={e => { const value = Number(e.target.value); setVolume(value); audio().setVolume(value / 100); youtube.current?.setVolume(value); }} />{volume}%</label>
 +          <button className="btn ghost" disabled={locked} onClick={() => void checkSpeaker()}>Check lamp speaker</button>
 +        </div>
-+        <p className="dance-analysis">{analysis}. <a href={song.source} target="_blank" rel="noreferrer">Tempo reference ↗</a></p>
++        <p className="dance-analysis">{useYouTube ? 'Uses the video playback clock and the tempo above. Adjust tempo / first beat start if the groove feels off; video audio is not analyzed.' : analysis}. <a href={song.source} target="_blank" rel="noreferrer">Tempo reference ↗</a></p>
 +        <div className="dance-score">
 +          <div className="dance-section-label">THE CHOREOGRAPHY <span>{report ? `${report.cues.length} phrases` : 'Preview before moving'}</span></div>
 +          {report ? <>
@@ -847,9 +1072,9 @@ index 0000000..208ec9f
 +            <details className="dance-cue-details"><summary>Source takes & speed limits</summary>{report.cues.map((cue, i) => <p key={i}>{cue.name}: {cue.source_window.map(v => v.toFixed(1)).join('–')}s excerpt · {cue.speed.toFixed(2)}× playback / {cue.max_speed.toFixed(2)}× safe cap</p>)}</details>
 +          </> : <div className="dance-score-empty"><AudioLines size={28} /><p>Your taught moves become a beat-aligned sequence.<br />Prepare checks every pose, transition, and speed.</p></div>}
 +        </div>
-+        <div className="dance-controls"><button className="btn" disabled={!ready || locked || bpm < 50 || bpm > 200 || !Number.isFinite(offset) || offset < 0 || Boolean(attachment && offset + 30 > attachment.buffer.duration)} onClick={() => void prepare()}><Check size={17} />{busy === 'Checking dance' ? 'Checking…' : 'Prepare dance'}</button>
++        <div className="dance-controls"><button className="btn" disabled={!ready || locked || bpm < 50 || bpm > 200 || !Number.isFinite(offset) || offset < 0 || Boolean(!useYouTube && attachment && offset + 30 > attachment.buffer.duration)} onClick={() => void prepare()}><Check size={17} />{busy === 'Checking dance' ? 'Checking…' : 'Prepare dance'}</button>
 +          <button className="btn ghost" aria-label="Remix choreography" title="Different order and take variation" disabled={!ready || locked} onClick={() => void prepare((variation + 1) % 1000)}><Shuffle size={18} /></button>
-+          <button className="btn dance-play" disabled={!ready || locked || !prepared} onClick={() => void start()}><Play size={18} />Start 30s dance</button>
++          <button className="btn dance-play" disabled={!ready || locked || !prepared || (useYouTube && !videoReady)} onClick={() => void start()}><Play size={18} />Start 30s dance</button>
 +          <button className="btn danger" disabled={!programRunning} onClick={() => void stop()}><Square size={17} />Stop</button>
 +        </div>
 +        <div className="dance-footer"><button className="btn ghost" disabled={locked || !prepared} onClick={() => void hear()}><Music2 size={16} />{hearing ? 'Stop audio preview' : 'Hear audio only'}</button><span>Start powers motors. Keep the path clear.<br />Stop cancels movement; motor holding stays on.</span></div>
@@ -1103,6 +1328,37 @@ index 0000000..47f726f
 +    </div>
 +  );
 +}
+diff --git a/apps/dashboard/frontend/tests/danceYouTube.test.mjs b/apps/dashboard/frontend/tests/danceYouTube.test.mjs
+new file mode 100644
+index 0000000..4b7f046
+--- /dev/null
++++ b/apps/dashboard/frontend/tests/danceYouTube.test.mjs
+@@ -0,0 +1,25 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { nextVideoBeat, parseYouTubeId, videoDrift } from '../src/utils/danceYouTube.ts';
++
++test('YouTube links are validated, never injected as arbitrary iframe URLs', () => {
++  for (const link of ['Sj_9CiNkkn4', 'https://youtu.be/Sj_9CiNkkn4?t=10', 'https://www.youtube.com/watch?v=Sj_9CiNkkn4&list=test', 'https://m.youtube.com/watch?v=Sj_9CiNkkn4', 'https://www.youtube-nocookie.com/embed/Sj_9CiNkkn4']) {
++    assert.equal(parseYouTubeId(link), 'Sj_9CiNkkn4');
++  }
++  for (const link of ['javascript:alert(1)', 'https://youtube.com.evil.test/watch?v=Sj_9CiNkkn4', '<iframe>', 'https://example.com/Sj_9CiNkkn4']) assert.throws(() => parseYouTubeId(link), /YouTube/);
++});
++
++test('robot joins a future video bar with network lead, including five-beat jazz', () => {
++  for (const bpm of [50, 100, 148, 174, 200]) for (const meter of [4, 5]) for (const media of [0, .15, 2, 25.123]) {
++    const first = .12, now = 123456;
++    const anchor = nextVideoBeat(media, first, bpm, meter, now);
++    const bar = 60 / bpm * meter;
++    assert.ok(anchor.start_at - now >= 1.5 - .000001);
++    assert.ok(anchor.start_at - now <= 1.5 + bar + .000001);
++    assert.ok(Math.abs((anchor.media_time - first) / bar - Math.round((anchor.media_time - first) / bar)) < 1e-8);
++    assert.ok(Math.abs(videoDrift(media + 5, anchor.media_time, now + 5, anchor.start_at)) < 1e-8);
++    assert.ok(Math.abs(videoDrift(media + 7, anchor.media_time, now + 5, anchor.start_at) - 2) < 1e-8);
++  }
++  assert.throws(() => nextVideoBeat(NaN, 0, 148, 4, 1), /Invalid/);
++  assert.throws(() => nextVideoBeat(0, 0, 300, 4, 1), /Invalid/);
++});
 diff --git a/apps/dashboard/frontend/tests/dancing.test.mjs b/apps/dashboard/frontend/tests/dancing.test.mjs
 new file mode 100644
 index 0000000..a5b360c
@@ -1265,7 +1521,7 @@ index 0000000..dcb5edf
 +  assert.deepEqual(JSON.parse(go.init.body), { name: 'teaching_neutral', teaching: true });
 +});
 diff --git a/apps/robot_runtime/web/legacy_routes/animations.py b/apps/robot_runtime/web/legacy_routes/animations.py
-index 937de23..fec6326 100644
+index 937de23..be9a86c 100644
 --- a/apps/robot_runtime/web/legacy_routes/animations.py
 +++ b/apps/robot_runtime/web/legacy_routes/animations.py
 @@ -3,6 +3,7 @@
@@ -1285,7 +1541,7 @@ index 937de23..fec6326 100644
 +        if isinstance(data, dict) and "dance" in data:
 +            from apps.robot_runtime.web.routes.dancing import dance_command
 +            return dance_command(self, data["dance"])
-+        if (getattr(self, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}:
++        if (getattr(self, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "waiting_audio", "countdown", "playing", "finishing", "stopping"}:
 +            return jsonify({"error": "Stop the dance before starting another animation"}), 409
 +        name = data.get("name") if isinstance(data, dict) else None
 +        if not isinstance(name, str) or not name:
@@ -1413,7 +1669,7 @@ index 937de23..fec6326 100644
      def stop_animation():
          previous = self._current_animation
 +        dance = getattr(self, "_dance_playback", None)
-+        if dance and dance.get("state") in {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}:
++        if dance and dance.get("state") in {"preparing", "to_neutral", "waiting_audio", "countdown", "playing", "finishing", "stopping"}:
 +            dance["cancelled"] = True
 +            dance['state'] = 'stopping'
 +        cancel = getattr(self, "_teaching_cancel", None)
@@ -1522,10 +1778,10 @@ index 0000000..28ba825
 +        await bus.unsubscribe(MOTION_ACTION_RESULT, completed)
 diff --git a/apps/robot_runtime/web/routes/dancing.py b/apps/robot_runtime/web/routes/dancing.py
 new file mode 100644
-index 0000000..dad0b31
+index 0000000..7cb10ea
 --- /dev/null
 +++ b/apps/robot_runtime/web/routes/dancing.py
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,165 @@
 +"""Dance catalog and two-step preview/start through authenticated motion routes."""
 +import asyncio
 +import math
@@ -1536,15 +1792,15 @@ index 0000000..dad0b31
 +from core.events.topics import MOTION_TORQUE_COMMAND, MOTION_TORQUE_RESULT
 +from .dance_lifecycle import execute_dance
 +
-+ACTIVE_STATES = {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}
++ACTIVE_STATES = {"preparing", "to_neutral", "waiting_audio", "countdown", "playing", "finishing", "stopping"}
 +
 +
 +def public_status(server):
 +    run = getattr(server, "_dance_playback", None) or {}
 +    motion = server._motion_status() if callable(getattr(server, '_motion_status', None)) else {}
-+    return {"version": 2, "server_time": time.time(),
++    return {"version": 3, "server_time": time.time(),
 +            "safety_latched": motion.get('is_safe') is False,
-+            **{key: run.get(key) for key in ("id", "song_id", "state", "start_at", "ended_at", "error", "audio_ready", "audio_mode")}}
++            **{key: run.get(key) for key in ("id", "song_id", "state", "start_at", "ended_at", "error", "audio_ready", "audio_mode", "media_time")}}
 +
 +
 +def register_dance_routes(server):
@@ -1569,16 +1825,24 @@ index 0000000..dad0b31
 +    if not isinstance(options, dict):
 +        return jsonify({"error": "Dance options must be an object"}), 400
 +    operation = options.get("operation")
-+    if operation not in {"prepare", "start", "heartbeat", "audio_ready"}:
++    if operation not in {"prepare", "start", "heartbeat", "audio_ready", "youtube_ready"}:
 +        return jsonify({"error": "Unknown dance operation"}), 400
 +    with server._dance_lock:
 +        run = server._dance_playback
-+        if operation in {"heartbeat", "audio_ready"}:
++        if operation in {"heartbeat", "audio_ready", "youtube_ready"}:
 +            if not run or run["id"] != options.get("id") or run["state"] not in ACTIVE_STATES:
 +                return jsonify({"error": "No matching active dance"}), 409
-+            if operation == 'audio_ready':
++            if operation == 'youtube_ready':
++                start_at, media_time = options.get('start_at'), options.get('media_time')
++                if (run.get('audio_mode') != 'youtube' or run['state'] != 'waiting_audio' or run.get('audio_ready')
++                        or any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)
++                               for v in (start_at, media_time))
++                        or not .75 <= start_at - time.time() <= 8 or not 0 <= media_time <= 86400):
++                    return jsonify({'error': 'YouTube synchronization missed its window; prepare again'}), 409
++                run.update(start_at=start_at, media_time=media_time, audio_ready=True)
++            elif operation == 'audio_ready':
 +                start_at = options.get('start_at')
-+                if (run['state'] != 'countdown' or not isinstance(start_at, (int, float))
++                if (run.get('audio_mode') == 'youtube' or run['state'] != 'countdown' or not isinstance(start_at, (int, float))
 +                        or isinstance(start_at, bool) or not math.isfinite(start_at)
 +                        or abs(start_at - (run.get('start_at') or 0)) > .001
 +                        or start_at - time.time() < .05):
@@ -1607,7 +1871,7 @@ index 0000000..dad0b31
 +            if type(status.get("torque_enabled")) is not bool:
 +                raise ValueError("Motor power state is unavailable")
 +            audio_mode = options.get('audio_mode')
-+            if audio_mode not in {'laptop_beat', 'laptop_file'}:
++            if audio_mode not in {'laptop_beat', 'laptop_file', 'youtube'}:
 +                raise ValueError('Choose laptop audio and refresh the dashboard before starting')
 +            run = {"id": identifier, "song_id": record["report"]["song"]["id"], "state": "preparing",
 +                   "start_at": None, "error": None, "heartbeat": time.monotonic(), "cancelled": False,
@@ -1684,7 +1948,7 @@ index 0000000..dad0b31
 +        except (ValueError, RuntimeError, OSError) as error:
 +            return jsonify({"error": str(error)}), 409
 diff --git a/apps/robot_runtime/web/routes/recording.py b/apps/robot_runtime/web/routes/recording.py
-index 658fccc..fca24ea 100644
+index 658fccc..4736480 100644
 --- a/apps/robot_runtime/web/routes/recording.py
 +++ b/apps/robot_runtime/web/routes/recording.py
 @@ -3,25 +3,50 @@
@@ -1788,7 +2052,7 @@ index 658fccc..fca24ea 100644
 +        # Use the existing authenticated mutation route; this operation never
 +        # starts/stops capture or changes motor power.
 +        if data.get("operation") == "save_neutral":
-+            if (getattr(server, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}:
++            if (getattr(server, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "waiting_audio", "countdown", "playing", "finishing", "stopping"}:
 +                return jsonify({"error": "Stop the dance before changing neutral"}), 409
 +            if data.get("restore_torque") is not False:
 +                return jsonify({"error": "Saving neutral must leave motor power unchanged"}), 400
@@ -2216,10 +2480,10 @@ index 0000000..b9a34ca
 +    return plan, report
 diff --git a/modules/robot_base/control/dance_runtime.py b/modules/robot_base/control/dance_runtime.py
 new file mode 100644
-index 0000000..c98ffee
+index 0000000..f04c1bb
 --- /dev/null
 +++ b/modules/robot_base/control/dance_runtime.py
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,176 @@
 +"""Single-owner dance admission, neutral entry, synchronized start, and lease."""
 +from __future__ import annotations
 +
@@ -2234,12 +2498,13 @@ index 0000000..c98ffee
 +
 +COUNTDOWN_SECONDS = 2.5
 +LEASE_SECONDS = 4.0
++YOUTUBE_WAIT_SECONDS = 8.0
 +
 +
 +class DanceControllerMixin:
 +    async def dance_catalog(self):
 +        info = self.safe_motion_info()
-+        result = {"version": 2, "songs": SONGS, "duration": 30, "actions": [], "neutral_valid": False,
++        result = {"version": 3, "songs": SONGS, "duration": 30, "actions": [], "neutral_valid": False,
 +                  "safety_latched": not self._safety.is_safe,
 +                  "motor_velocity_limit": info["max_velocity_units_s"]}
 +        try:
@@ -2312,6 +2577,7 @@ index 0000000..c98ffee
 +        self._foreground_generation += 1
 +        generation = self._foreground_generation
 +        calibration = record["info"]["calibration_id"]
++        lease_seconds = min(LEASE_SECONDS, 2.0) if run.get('audio_mode') == 'youtube' else LEASE_SECONDS
 +        if self._queue:
 +            self._queue.pause_idle()
 +
@@ -2319,7 +2585,7 @@ index 0000000..c98ffee
 +            self._check_teaching_generation(generation, calibration)
 +            if run.get("cancelled"):
 +                raise asyncio.CancelledError("Dance stopped")
-+            if time.monotonic() - run["heartbeat"] > LEASE_SECONDS:
++            if time.monotonic() - run["heartbeat"] > lease_seconds:
 +                raise RuntimeError("Dance stopped: laptop connection lost")
 +
 +        async def watchdog():
@@ -2328,7 +2594,7 @@ index 0000000..c98ffee
 +                if run.get('cancelled'):
 +                    await self.stop_all()
 +                    return
-+                if time.monotonic() - run["heartbeat"] > LEASE_SECONDS:
++                if time.monotonic() - run["heartbeat"] > lease_seconds:
 +                    run["error"] = "Dance stopped: laptop connection lost"
 +                    run["cancelled"] = True
 +                    await self.stop_all()
@@ -2336,9 +2602,24 @@ index 0000000..c98ffee
 +
 +        async def countdown():
 +            guard()
++            if run.get('audio_mode') == 'youtube':
++                # Video is already playing. Join a future bar on its observed
++                # clock only after the robot has reached neutral.
++                run['state'] = 'waiting_audio'
++                timeout = time.monotonic() + YOUTUBE_WAIT_SECONDS
++                while not run.get('audio_ready'):
++                    guard()
++                    if time.monotonic() >= timeout:
++                        raise ValueError('YouTube synchronization was not received; dance stopped')
++                    await asyncio.sleep(.025)
++                delay = run['start_at'] - time.time()
++                if delay < .5:
++                    raise ValueError('YouTube synchronized start was missed; dance stopped')
++            else:
++                delay = COUNTDOWN_SECONDS
++                run["start_at"] = time.time() + delay
 +            run["state"] = "countdown"
-+            run["start_at"] = time.time() + COUNTDOWN_SECONDS
-+            deadline = time.monotonic() + COUNTDOWN_SECONDS
++            deadline = time.monotonic() + delay
 +            while time.monotonic() < deadline:
 +                guard()
 +                await asyncio.sleep(min(.025, max(0, deadline - time.monotonic())))
@@ -2892,13 +3173,14 @@ index 169754e..50bb30d 100644
  
 diff --git a/static/dances/catalog.json b/static/dances/catalog.json
 new file mode 100644
-index 0000000..9cff781
+index 0000000..b84ed9e
 --- /dev/null
 +++ b/static/dances/catalog.json
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,102 @@
 +[
 +  {
 +    "id": "waterloo",
++    "youtube_id": "Sj_9CiNkkn4",
 +    "title": "Waterloo",
 +    "artist": "ABBA",
 +    "genre": "Pop",
@@ -2918,6 +3200,7 @@ index 0000000..9cff781
 +  },
 +  {
 +    "id": "superstition",
++    "youtube_id": "egqv1mtos6A",
 +    "title": "Superstition",
 +    "artist": "Stevie Wonder",
 +    "genre": "Funk",
@@ -2937,6 +3220,7 @@ index 0000000..9cff781
 +  },
 +  {
 +    "id": "around_the_world",
++    "youtube_id": "K0HSD_i2DvA",
 +    "title": "Around the World",
 +    "artist": "Daft Punk",
 +    "genre": "House",
@@ -2956,6 +3240,7 @@ index 0000000..9cff781
 +  },
 +  {
 +    "id": "seven_nation_army",
++    "youtube_id": "0J2QdDbelmY",
 +    "title": "Seven Nation Army",
 +    "artist": "The White Stripes",
 +    "genre": "Garage rock",
@@ -2975,6 +3260,7 @@ index 0000000..9cff781
 +  },
 +  {
 +    "id": "take_five",
++    "youtube_id": "ryA6eHZNnXY",
 +    "title": "Take Five",
 +    "artist": "The Dave Brubeck Quartet",
 +    "genre": "Jazz \u00b7 5/4",
@@ -2995,10 +3281,10 @@ index 0000000..9cff781
 +]
 diff --git a/tests/dancing_dom_smoke.cjs b/tests/dancing_dom_smoke.cjs
 new file mode 100644
-index 0000000..baed020
+index 0000000..e58ff36
 --- /dev/null
 +++ b/tests/dancing_dom_smoke.cjs
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,191 @@
 +/* Actual React interactions; all device APIs and audio are simulated. */
 +const assert = require('node:assert/strict');
 +const path = require('node:path');
@@ -3034,7 +3320,7 @@ index 0000000..baed020
 +  if (url === '/api/dances') {
 +    if (state.oldBackend) return new Response(`<!doctype html><html lang=en><title>${legacyStatus} Method Not Allowed</title></html>`, { status: legacyStatus });
 +    if (state.warming > 0) { state.warming--; return new Response(JSON.stringify({ error: 'Main program is not running' }), { status: 503 }); }
-+    result = { version: state.backendVersion || 2, songs, neutral_valid: true, safety_latched: false, actions: [{ name: 'teach_nod_t02' }] };
++    result = { version: state.backendVersion || 3, songs, neutral_valid: true, safety_latched: false, actions: [{ name: 'teach_nod_t02' }] };
 +  }
 +  if (url === '/api/dances/status') {
 +    result = { ...state.status, server_time: Date.now() / 1000 };
@@ -3090,6 +3376,9 @@ index 0000000..baed020
 +(async () => {
 +  try {
 +    await until(() => button('Prepare dance') && !button('Prepare dance').disabled);
++    const soundtrack = w.document.querySelector('[aria-label="Soundtrack source"]');
++    soundtrack.value = 'local'; soundtrack.dispatchEvent(new w.Event('change', { bubbles: true }));
++    await until(() => !w.document.querySelector('[aria-label="YouTube soundtrack"]'));
 +    assert.equal(w.document.querySelectorAll('.dance-record').length, 5);
 +    assert.equal(button('Start 30s dance').disabled, true);
 +    click('Test laptop audio');
@@ -3189,7 +3478,7 @@ index 0000000..baed020
 +})().catch(error => { console.error(error); process.exitCode = 1; });
 diff --git a/tests/dancing_legacy_backend_smoke.cjs b/tests/dancing_legacy_backend_smoke.cjs
 new file mode 100644
-index 0000000..4566330
+index 0000000..2cef153
 --- /dev/null
 +++ b/tests/dancing_legacy_backend_smoke.cjs
 @@ -0,0 +1,39 @@
@@ -3224,7 +3513,7 @@ index 0000000..4566330
 +  try {
 +    const button = label => [...w.document.querySelectorAll('button')].find(b => b.textContent.trim() === label);
 +    for (let i = 0; i < 150 && !button('Load dance update'); i++) await new Promise(r => setTimeout(r, 30));
-+    assert.ok(codes.some(c => c === 404 || c === 405) || versions.some(v => v !== 2), 'requires the old backend');
++    assert.ok(codes.some(c => c === 404 || c === 405) || versions.some(v => v !== 3), 'requires the old backend');
 +    assert.ok(button('Load dance update'));
 +    assert.equal(button('Prepare dance').disabled, true);
 +    assert.equal(button('Start 30s dance').disabled, true);
@@ -3234,10 +3523,10 @@ index 0000000..4566330
 +})().catch(error => { console.error(error); process.exitCode = 1; });
 diff --git a/tests/dancing_live_prepare_smoke.cjs b/tests/dancing_live_prepare_smoke.cjs
 new file mode 100644
-index 0000000..444e49b
+index 0000000..b6505d8
 --- /dev/null
 +++ b/tests/dancing_live_prepare_smoke.cjs
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,58 @@
 +/* Live backend + actual React Prepare flow. No motor/audio/restart operations.
 + * Only catalog/status GETs and the non-moving prepare operation are permitted.
 + */
@@ -3280,6 +3569,9 @@ index 0000000..444e49b
 +(async () => {
 +  try {
 +    await until(() => button('Prepare dance') && !button('Prepare dance').disabled);
++    const soundtrack = w.document.querySelector('[aria-label="Soundtrack source"]');
++    soundtrack.value = 'local'; soundtrack.dispatchEvent(new w.Event('change', { bubbles: true }));
++    await until(() => !w.document.querySelector('[aria-label="YouTube soundtrack"]'));
 +    button('Prepare dance').click();
 +    await until(() => !button('Start 30s dance').disabled);
 +    const polls = requests.filter(r => r.url === '/api/dances/status').length;
@@ -3291,6 +3583,170 @@ index 0000000..444e49b
 +    assert.equal(w.document.querySelector('[role="alert"]'), null);
 +    assert.equal(requests.filter(r => r.method === 'POST').length, 1);
 +    console.log('PASS: live Waterloo preparation, real choreography, preview retained over multiple idle polls, Start remains enabled. No motion, audio, or restart requested.');
++  } finally { w.close(); }
++})().catch(error => { console.error(error); process.exitCode = 1; });
+diff --git a/tests/dancing_youtube_browser_probe.cjs b/tests/dancing_youtube_browser_probe.cjs
+new file mode 100644
+index 0000000..fc25d10
+--- /dev/null
++++ b/tests/dancing_youtube_browser_probe.cjs
+@@ -0,0 +1,67 @@
++/* Optional real Chromium/YouTube connectivity check. No robot APIs or motors.
++ * node tests/dancing_youtube_browser_probe.cjs /path/to/node_modules/ws
++ * Browser sound is muted. A blocked embed is reported, never bypassed.
++ */
++const assert = require('node:assert/strict');
++const http = require('node:http');
++const path = require('node:path');
++const os = require('node:os');
++const fs = require('node:fs');
++const { spawn } = require('node:child_process');
++const WebSocket = require(process.argv[2]);
++const frontend = path.resolve(__dirname, '../apps/dashboard/frontend');
++const { buildSync } = require(path.join(frontend, 'node_modules/esbuild'));
++const script = buildSync({ stdin: { resolveDir: frontend, loader: 'ts', contents: `
++import { DanceYouTube } from './src/utils/danceYouTube';
++const state = window.probe = { ready: false, error: '', time: 0 };
++const p = new DanceYouTube(document.getElementById('player'), 'Sj_9CiNkkn4', message => state.error = message);
++p.ready.then(() => state.ready = true).catch(e => state.error = e.message);
++window.playProbe = async () => { try { await p.begin(0, 60); p.assertHealthy(); state.time = p.time; return { time: p.time, duration: p.duration }; } catch(e) { state.error = e.message; return { error: e.message }; } };
++window.endProbe = () => p.destroy();
++` }, bundle: true, write: false, format: 'iife' }).outputFiles[0].text;
++const server = http.createServer((req, res) => {
++  console.log('Probe HTTP ' + req.url);
++  res.setHeader('Referrer-Policy', 'same-origin');
++  if (req.url === '/probe.js') { res.setHeader('Content-Type', 'text/javascript'); res.end(script); }
++  else if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); res.end('<div id="player" style="width:640px;height:390px"></div><script src="/probe.js"></script>'); }
++  else { res.statusCode = 404; res.end(); }
++});
++const delay = ms => new Promise(r => setTimeout(r, ms));
++(async () => {
++  let browser, socket;
++  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
++  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dance-youtube-probe-'));
++  try {
++    browser = spawn('/usr/bin/chromium', ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-extensions', '--no-proxy-server', '--mute-audio', '--autoplay-policy=document-user-activation-required', '--remote-debugging-port=0', '--user-data-dir=' + profile, `http://127.0.0.1:${server.address().port}/`], { stdio: ['ignore', 'ignore', 'pipe'] });
++    const endpoint = await new Promise((resolve, reject) => {
++      const timer = setTimeout(() => reject(new Error('Chromium startup timeout')), 12000);
++      let log = ''; browser.stderr.on('data', chunk => { log += chunk; const m = log.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });
++    });
++    socket = new WebSocket(endpoint); await new Promise(resolve => socket.once('open', resolve));
++    let seq = 0; const pending = new Map();
++    socket.on('message', raw => { const msg = JSON.parse(raw); if (pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); } });
++    const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
++      const id = ++seq, timer = setTimeout(() => { pending.delete(id); reject(new Error(method + ' timed out')); }, 20000);
++      pending.set(id, msg => { clearTimeout(timer); msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result); });
++      socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
++    });
++    const targets = (await send('Target.getTargets')).targetInfos;
++    console.log('Probe pages: ' + JSON.stringify(targets.map(t => ({ type: t.type, url: t.url }))));
++    const target = targets.find(t => t.type === 'page' && t.url.includes('127.0.0.1')) || targets.find(t => t.type === 'page');
++    const { sessionId } = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
++    await send('Runtime.enable', {}, sessionId);
++    await send('Runtime.runIfWaitingForDebugger', {}, sessionId);
++    const evaluate = async (expression, extra = {}) => (await send('Runtime.evaluate', { expression, returnByValue: true, ...extra }, sessionId)).result.value;
++    let status;
++    for (let i = 0; i < 100; i++) { status = await evaluate('window.probe'); if (status?.ready || status?.error) break; await delay(300); }
++    assert.ok(status?.ready, JSON.stringify({ status, page: await evaluate('({url: location.href, text: document.body?.innerText?.slice(0, 1000)})') }));
++    const result = await evaluate('window.playProbe()', { awaitPromise: true, userGesture: true });
++    console.log(JSON.stringify({ embed_ready: status.ready, ...result, motor_requests: 0 }));
++    await evaluate('window.endProbe()');
++    if (result.error) process.exitCode = 2;
++    else assert.ok(result.time > 0 && result.duration > 40);
++  } finally {
++    socket?.close(); browser?.kill('SIGTERM'); server.close();
++    console.log('Temporary browser profile retained at ' + profile);
++  }
++})().catch(error => { console.error(error); process.exitCode = 1; server.close(); });
+diff --git a/tests/dancing_youtube_dom_smoke.cjs b/tests/dancing_youtube_dom_smoke.cjs
+new file mode 100644
+index 0000000..3291cc6
+--- /dev/null
++++ b/tests/dancing_youtube_dom_smoke.cjs
+@@ -0,0 +1,85 @@
++/* Actual React + advancing fake YouTube player. No network or hardware. */
++const assert = require('node:assert/strict');
++const path = require('node:path');
++const { JSDOM } = require(process.argv[2]);
++const frontend = path.resolve(__dirname, '../apps/dashboard/frontend');
++const { buildSync } = require(path.join(frontend, 'node_modules/esbuild'));
++const songs = require('../static/dances/catalog.json');
++const dom = new JSDOM('<div id="root"></div>', { url: 'http://dance.test', runScripts: 'dangerously', pretendToBeVisual: true });
++const w = dom.window, requests = [], players = [];
++let status = {}, blocked = false, rejectSync = false;
++w.YT = { Player: class {
++  constructor(frame, { events }) { this.id = new URL(frame.src).pathname.split('/').pop(); this.events = events; this.state = 2; this.position = 0; this.rate = 1; this.volume = 60; players.push(this); setTimeout(() => events.onReady({}), 5); }
++  getCurrentTime() { return this.position + (this.state === 1 ? (Date.now() - this.started) / 1000 : 0); }
++  getDuration() { return 220; } getVideoUrl() { return 'https://www.youtube.com/watch?v=' + this.id; }
++  getPlayerState() { return this.state; } getPlaybackRate() { return this.rate; }
++  setPlaybackRate(rate) { this.rate = rate; } setVolume(v) { this.volume = v; } getVolume() { return this.volume; } unMute() {} isMuted() { return false; }
++  seekTo(t) { this.position = t; this.started = Date.now(); }
++  playVideo() { if (blocked) { this.events.onAutoplayBlocked({}); return; } this.state = 1; this.started = Date.now(); }
++  pauseVideo() { this.position = this.getCurrentTime(); this.state = 2; this.events.onStateChange({ data: 2 }); }
++  destroy() { this.state = 2; }
++  interrupt(state) { this.position = this.getCurrentTime(); this.state = state; this.events.onStateChange({ data: state }); }
++} };
++w.fetch = async (url, init = {}) => {
++  const data = init.body ? JSON.parse(init.body) : {};
++  requests.push({ url, data }); let result = {};
++  if (url === '/api/auth/session') result = { authenticated: true, csrf_token: 'test' };
++  if (url === '/api/dances') result = { version: 3, songs, neutral_valid: true, safety_latched: false, actions: [] };
++  if (url === '/api/audio/output-devices') result = { devices: [] };
++  if (url === '/api/dances/status') result = { ...status, server_time: Date.now() / 1000 };
++  if (url === '/api/animations/stop') status = { ...status, state: 'stopped' };
++  if (url === '/api/animations/play') {
++    const op = data.dance.operation;
++    if (op === 'prepare') result = { id: 'dance_' + requests.length, report: { song: songs[0], bpm: 148, meter: 4, beats: [0, .405, .811], duration: 30, cues: [], preview: [], peak_speed: 100, speed_budget: 195 } };
++    if (op === 'start') { assert.equal(data.dance.audio_mode, 'youtube'); assert.equal(players.at(-1).state, 1, 'song plays before any motor start'); status = { id: data.dance.id, state: 'waiting_audio', audio_mode: 'youtube' }; }
++    if (op === 'youtube_ready') {
++      if (rejectSync) return new Response(JSON.stringify({ error: 'YouTube synchronization missed its window' }), { status: 409 });
++      assert.equal(status.state, 'waiting_audio');
++      assert.ok(data.dance.start_at - Date.now() / 1000 > .75);
++      status = { ...status, state: 'countdown', start_at: data.dance.start_at, media_time: data.dance.media_time, audio_ready: true };
++    }
++    if (op !== 'prepare') result = { ...status, server_time: Date.now() / 1000 };
++  }
++  return new Response(JSON.stringify(result));
++};
++const bundle = buildSync({ stdin: { resolveDir: frontend, loader: 'tsx', contents: `
++import React from 'react'; import { createRoot } from 'react-dom/client'; import { DancingView } from './src/views/DancingView';
++const root = createRoot(document.getElementById('root')); root.render(<DancingView programRunning={true}/>); window.unmountDance = () => root.unmount();
++` }, bundle: true, write: false, format: 'iife', define: { 'process.env.NODE_ENV': '"production"' } });
++w.eval(bundle.outputFiles[0].text);
++const button = label => [...w.document.querySelectorAll('button')].find(b => b.textContent.trim() === label);
++const click = label => { const b = button(label); assert.ok(b && !b.disabled, label + ' enabled'); b.click(); };
++const ops = op => requests.filter(r => r.data.dance?.operation === op);
++async function until(check) { for (let i = 0; i < 300; i++) { await new Promise(r => setTimeout(r, 20)); if (check()) return; } throw new Error('UI timeout: ' + w.document.body.textContent); }
++async function prepare() { await until(() => !button('Prepare dance').disabled); click('Prepare dance'); await until(() => !button('Start 30s dance').disabled); }
++async function start() { await prepare(); click('Start 30s dance'); await until(() => status.state === 'countdown'); }
++(async () => {
++  try {
++    await until(() => w.document.body.textContent.includes('YouTube ready'));
++    assert.equal(w.document.querySelector('iframe').referrerPolicy, 'strict-origin-when-cross-origin');
++    assert.equal(w.document.querySelector('[aria-label="Soundtrack source"]').value, 'youtube');
++    await start();
++    assert.equal(ops('youtube_ready').length, 1); assert.equal(ops('audio_ready').length, 0);
++    assert.ok(Math.abs(players.at(-1).getCurrentTime() - (status.media_time + Date.now() / 1000 - status.start_at)) < .1);
++    players.at(-1).interrupt(3);
++    await until(() => status.state === 'stopped' && !button('Prepare dance').disabled);
++    assert.ok(w.document.body.textContent.includes('buffered'));
++    assert.equal(players.at(-1).state, 2);
++    await start(); status = { ...status, state: 'completed' };
++    await until(() => w.document.body.textContent.includes('Complete · back at neutral'));
++    assert.equal(players.at(-1).state, 2); assert.equal(button('Start 30s dance').disabled, true);
++    await prepare(); blocked = true; const before = ops('start').length;
++    click('Start 30s dance'); await until(() => w.document.body.textContent.includes('YouTube blocked playback') && !button('Prepare dance').disabled);
++    assert.equal(ops('start').length, before, 'autoplay block cannot start motors'); blocked = false;
++    await start(); players.at(-1).position += 3;
++    await until(() => status.state === 'stopped' && !button('Prepare dance').disabled);
++    assert.ok(w.document.body.textContent.includes('lost sync'));
++    await prepare(); rejectSync = true; click('Start 30s dance');
++    await until(() => w.document.body.textContent.includes('synchronization missed') && !button('Prepare dance').disabled);
++    assert.equal(status.state, 'stopped'); rejectSync = false;
++    await start(); click('Stop'); await until(() => status.state === 'stopped' && !button('Prepare dance').disabled);
++    assert.equal(players.at(-1).state, 2);
++    await start(); w.unmountDance(); await until(() => status.state === 'stopped');
++    console.log('PASS: default YouTube, advancing video clock, future beat handshake, buffer/seek cancellation, autoplay blocks motors, completion, Stop and unmount. No hardware/network.');
 +  } finally { w.close(); }
 +})().catch(error => { console.error(error); process.exitCode = 1; });
 diff --git a/tests/teaching_dom_smoke.cjs b/tests/teaching_dom_smoke.cjs
@@ -3419,10 +3875,10 @@ index 0000000..41b149e
 +})().catch(error => { console.error(error); process.exitCode = 1; });
 diff --git a/tests/unit/test_dance_lifecycle.py b/tests/unit/test_dance_lifecycle.py
 new file mode 100644
-index 0000000..daca980
+index 0000000..50ae539
 --- /dev/null
 +++ b/tests/unit/test_dance_lifecycle.py
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,129 @@
 +"""Real web/behavior/event-bus lifecycle with fake motors (never hardware)."""
 +import asyncio
 +import os
@@ -3445,6 +3901,9 @@ index 0000000..daca980
 +    import apps.robot_runtime.web.routes.dance_lifecycle as lifecycle_module
 +    countdown = 2.5 if realtime else .12
 +    monkeypatch.setattr(controller_module, 'COUNTDOWN_SECONDS', countdown)
++    youtube = outcome.startswith('youtube')
++    if outcome == 'youtube_missing':
++        monkeypatch.setattr(controller_module, 'YOUTUBE_WAIT_SECONDS', .15)
 +    controller, submitted, old_run, record = runtime_fixture(tmp_path)
 +    record['run'] = None
 +    record['report']['song'] = SONGS[0]
@@ -3459,7 +3918,7 @@ index 0000000..daca980
 +    bus = EventBus(handler_timeout_s=30 if realtime else .08)
 +    if outcome in {'timeout', 'stop_rejected'}:
 +        monkeypatch.setattr(lifecycle_module, 'TOTAL_TIMEOUT_SECONDS', .08)
-+    if outcome == 'disconnect':
++    if outcome in {'disconnect', 'youtube_disconnect'}:
 +        monkeypatch.setattr(controller_module, 'LEASE_SECONDS', .12)
 +    tracker = ContextTracker()
 +    manager = MotionManager(controller, RuleBasedMotionPolicy(), tracker)
@@ -3478,7 +3937,7 @@ index 0000000..daca980
 +        if outcome == 'safety':
 +            controller._safety.emergency_stop()
 +        response = await asyncio.to_thread(client.post, '/api/animations/play', json={
-+            'dance': {'operation': 'start', 'id': 'dance_test', 'audio_mode': 'laptop_beat'}})
++            'dance': {'operation': 'start', 'id': 'dance_test', 'audio_mode': 'youtube' if youtube else 'laptop_beat'}})
 +        if outcome == 'safety':
 +            assert response.status_code == 409 and 'latched' in response.json['error']
 +            assert not submitted and server._dance_playback is None
@@ -3489,25 +3948,30 @@ index 0000000..daca980
 +        limit = time.monotonic() + (40 if realtime else 4)
 +        while run.get('ended_at') is None or server._current_animation:
 +            assert time.monotonic() < limit, run
-+            if outcome != 'disconnect' or run['state'] != 'playing':
++            if outcome not in {'disconnect', 'youtube_disconnect'} or run['state'] != 'playing':
 +                run['heartbeat'] = time.monotonic()  # simulated visible laptop
++            if run['state'] == 'waiting_audio' and outcome not in {'youtube_missing', 'youtube_stopped'} and not run.get('audio_ready'):
++                assert len(submitted) == 1, 'YouTube cannot start the body before verified neutral'
++                acknowledgment = await asyncio.to_thread(client.post, '/api/animations/play', json={
++                    'dance': {'operation': 'youtube_ready', 'id': run['id'], 'start_at': time.time() + .85, 'media_time': 8.5}})
++                assert acknowledgment.status_code == 200
 +            if run['state'] == 'countdown' and not run.get('audio_ready') and outcome != 'no_audio':
 +                acknowledgment = await asyncio.to_thread(client.post, '/api/animations/play', json={
 +                    'dance': {'operation': 'audio_ready', 'id': run['id'], 'start_at': run['start_at']}})
 +                assert acknowledgment.status_code == 200
-+            if outcome == 'stopped' and run['state'] == 'playing' and not stop_requested:
++            if ((outcome == 'stopped' and run['state'] == 'playing') or (outcome == 'youtube_stopped' and run['state'] == 'waiting_audio')) and not stop_requested:
 +                stopped = await asyncio.to_thread(client.post, '/api/animations/stop')
 +                assert stopped.status_code == 200, stopped.json
 +                assert run['state'] == 'stopped'
 +                stop_requested = True
 +            await asyncio.sleep(.015)
 +        final = (await asyncio.to_thread(client.get, '/api/dances/status')).json
-+        expected = 'failed' if outcome in {'failed', 'no_audio', 'timeout', 'stop_rejected', 'disconnect'} else outcome
++        expected = 'completed' if outcome == 'youtube' else 'stopped' if outcome == 'youtube_stopped' else 'failed' if outcome in {'failed', 'no_audio', 'timeout', 'stop_rejected', 'disconnect', 'youtube_missing', 'youtube_disconnect'} else outcome
 +        assert final['state'] == expected, final
 +        assert final['ended_at'] and server._current_animation is None
 +        assert 'dance_test' not in controller._dance_prepared
 +        assert bus.diagnostics()['handler_timeout_count'] == 0
-+        if outcome == 'completed':
++        if outcome in {'completed', 'youtube'}:
 +            assert final['error'] is None and len(submitted) == 2
 +            assert submitted[-1].waypoints[-1].positions == record['neutral']['positions']
 +        elif outcome == 'failed':
@@ -3519,9 +3983,11 @@ index 0000000..daca980
 +        elif outcome == 'stop_rejected':
 +            assert 'Simulated stop acknowledgment failure' in final['error']
 +            controller._executor.stop.assert_awaited()
-+        elif outcome == 'disconnect':
++        elif outcome in {'disconnect', 'youtube_disconnect'}:
 +            assert 'laptop connection lost' in final['error']
-+        elif outcome == 'stopped':
++        elif outcome == 'youtube_missing':
++            assert 'synchronization was not received' in final['error'] and len(submitted) == 1
++        elif outcome in {'stopped', 'youtube_stopped'}:
 +            assert final['error'] is None
 +        assert not bus._subscribers.get('motion.action.result')
 +    finally:
@@ -3529,7 +3995,7 @@ index 0000000..daca980
 +        await bus.stop_background()
 +
 +
-+@pytest.mark.parametrize('outcome', ['completed', 'failed', 'stopped', 'no_audio', 'timeout', 'safety', 'stop_rejected', 'disconnect'])
++@pytest.mark.parametrize('outcome', ['completed', 'failed', 'stopped', 'no_audio', 'timeout', 'safety', 'stop_rejected', 'disconnect', 'youtube', 'youtube_missing', 'youtube_stopped', 'youtube_disconnect'])
 +def test_full_lifecycle_with_real_event_bus_and_fake_motors(tmp_path, monkeypatch, outcome):
 +    asyncio.run(exercise(tmp_path, monkeypatch, outcome))
 +
@@ -3537,12 +4003,17 @@ index 0000000..daca980
 +@pytest.mark.skipif(os.environ.get('DANCE_REALTIME_TEST') != '1', reason='opt-in 35-second fake-motor regression')
 +def test_full_30_second_dance_survives_default_bus_timeout(tmp_path, monkeypatch):
 +    asyncio.run(exercise(tmp_path, monkeypatch, realtime=True))
++
++
++@pytest.mark.skipif(os.environ.get('DANCE_REALTIME_TEST') != '1', reason='opt-in real-time YouTube handshake with fake motors')
++def test_full_30_second_youtube_dance_survives_default_bus_timeout(tmp_path, monkeypatch):
++    asyncio.run(exercise(tmp_path, monkeypatch, outcome='youtube', realtime=True))
 diff --git a/tests/unit/test_dancing.py b/tests/unit/test_dancing.py
 new file mode 100644
-index 0000000..42d4c7b
+index 0000000..058bfb4
 --- /dev/null
 +++ b/tests/unit/test_dancing.py
-@@ -0,0 +1,293 @@
+@@ -0,0 +1,313 @@
 +"""Dance compilation and admission tests; fake motors only."""
 +import asyncio
 +import math
@@ -3763,7 +4234,7 @@ index 0000000..42d4c7b
 +    prepared = {'id': 'dance_test', 'report': record['report'], 'expires_in': 180}
 +    server.motion = SimpleNamespace(
 +        prepare_dance=AsyncMock(return_value=prepared),
-+        dance_catalog=AsyncMock(return_value={'version': 2, 'songs': SONGS}),
++        dance_catalog=AsyncMock(return_value={'version': 3, 'songs': SONGS}),
 +        _dance_record=lambda _: record, _dance_prepared={'dance_test': record},
 +        validate_dance_entry=AsyncMock(side_effect=ValueError(failure) if failure else None))
 +    server._motion_status = lambda: {'torque_enabled': False, 'current_idle': None, 'is_moving': False}
@@ -3782,7 +4253,7 @@ index 0000000..42d4c7b
 +    register_dance_routes(server)
 +    register_animation_routes(server)
 +    client = server.app.test_client()
-+    assert client.get('/api/dances').json['version'] == 2
++    assert client.get('/api/dances').json['version'] == 3
 +    assert client.post('/api/animations/play', json={'dance': {'operation': 'prepare', 'song_id': 'waterloo'}}).status_code == 200
 +    server._publish_lifecycle_request.assert_not_awaited()
 +    server._request_behavior_intent_lifecycle.assert_not_awaited()
@@ -3836,6 +4307,26 @@ index 0000000..42d4c7b
 +        'operation': 'audio_ready', 'id': 'other' if kind == 'wrong_id' else 'dance_owner', 'start_at': stamp}})
 +    assert response.status_code == (200 if kind == 'valid' else 409)
 +    assert server._dance_playback['audio_ready'] is (kind == 'valid')
++
++
++@pytest.mark.parametrize('kind', ['valid', 'wrong_id', 'late', 'far', 'boolean', 'nan', 'bad_media', 'wrong_mode', 'playing', 'duplicate'])
++def test_youtube_sync_can_only_arm_once_at_neutral_with_bounded_future_time(tmp_path, kind):
++    from tests.unit.test_teaching import fixture
++    from apps.robot_runtime.web.routes.dancing import register_dance_routes
++    from apps.robot_runtime.web.legacy_routes.animations import register_animation_routes
++    server, _ = fixture(tmp_path, recording=False)
++    register_dance_routes(server)
++    register_animation_routes(server)
++    run = server._dance_playback = {'id': 'dance_owner', 'state': 'playing' if kind == 'playing' else 'waiting_audio',
++        'heartbeat': 0, 'audio_ready': kind == 'duplicate', 'audio_mode': 'laptop_beat' if kind == 'wrong_mode' else 'youtube'}
++    start = time.time() + (20 if kind == 'far' else .1 if kind == 'late' else 2)
++    if kind == 'boolean': start = True
++    if kind == 'nan': start = float('nan')
++    response = server.app.test_client().post('/api/animations/play', json={'dance': {
++        'operation': 'youtube_ready', 'id': 'other' if kind == 'wrong_id' else 'dance_owner',
++        'start_at': start, 'media_time': -1 if kind == 'bad_media' else 10}})
++    assert response.status_code == (200 if kind == 'valid' else 409)
++    assert run.get('start_at') == (start if kind == 'valid' else None)
 diff --git a/tests/unit/test_idle_route.py b/tests/unit/test_idle_route.py
 index d7ef77a..8e91e1c 100644
 --- a/tests/unit/test_idle_route.py
