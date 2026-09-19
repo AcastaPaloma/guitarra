@@ -2,7 +2,8 @@
 
 This directory preserves earlier MuJoCo guitar experiments. It is **not** a runtime,
 training-data, or physical-validation dependency of the current guitar build. No simulated
-band or simulator-first fine-tuning pipeline is planned.
+band or simulator-first fine-tuning pipeline is planned. The active guitar camera input
+is **off by default**; simulated rendering/camera assets here are not a live-camera requirement.
 
 Start at [the current design](../DESIGN.md), [status](../STATUS.md), and
 [pretrained-model rehearsal](../REHEARSAL_LOOP.md). Offline fake-motion tests elsewhere in

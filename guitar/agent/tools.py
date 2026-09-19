@@ -5,7 +5,7 @@ ranges live in the descriptions and are enforced here (strict schemas can't carr
 so an out-of-range request comes back to the model as an error instead of being clamped.
 """
 import json
-from dataclasses import dataclass, field
+from .protocol import ToolCall, ToolResult
 
 from robot import fretmap
 from robot.arm import MAX_DEPTH_MM, Arm
@@ -14,39 +14,36 @@ from sense import camera
 from sense.mic import score, transpose, wait_for_pluck
 
 
-@dataclass
-class ToolCall:
-    id: str
-    name: str
-    args: dict
-
-
-@dataclass
-class ToolResult:
-    call_id: str
-    text: str
-    image_jpeg: bytes | None = None
-    is_error: bool = False
-    record: dict = field(default_factory=dict)  # full detail for decisions.jsonl
-
-
 def _obj(props: dict) -> dict:
     return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
 
 
 MAX_PRESS_MM = fretmap.MAX_PRESS_MM
+NO_AUDIO_MESSAGE = "unavailable: microphone disabled; no acoustic measurement"
 
 
-def specs(pose_names: list[str], role: str = "pluck", fret_map: dict[int, list[int]] | None = None) -> list[dict]:
+def specs(pose_names: list[str], role: str = "pluck", fret_map: dict[int, list[int]] | None = None,
+          *, use_camera: bool = False, use_mic: bool = False) -> list[dict]:
+    """Advertise only enabled observations; look is state-only unless camera is opted in."""
     speed = {"type": "number", "description": "0.2 (slow) to 1.0 (fastest allowed). Scales a fixed safety speed cap."}
+    image_feedback = " A camera snapshot may be attached when available." if use_camera else ""
+    fret_feedback = (
+        " Waits for a pluck and returns local audio estimates when a measurement is available."
+        if use_mic else " No acoustic measurement is available in this session."
+    )
+    pluck_feedback = (
+        " Returns local audio estimates when a measurement is available."
+        if use_mic else " No acoustic measurement is available in this session."
+    )
     if role == "fret":
         instrument = [
             {
                 "name": "fret",
                 "description": (
                     "Press a string just behind a fret: lifts off any held fret, hovers, lowers to touch "
-                    "and presses press_mm further. Then waits for the string to be plucked and returns "
-                    "the pitch heard vs the expected note, plus a camera frame. Calibrated positions: "
+                    "and presses press_mm further. Returns arm state and the intended note."
+                    + fret_feedback + image_feedback
+                    + " Recorded positions (use only operator-qualified targets/settings): "
                     + "; ".join(f"string {s}: frets {v[0]}-{v[-1]}" for s, v in (fret_map or {}).items())
                 ),
                 "parameters": _obj({
@@ -69,7 +66,8 @@ def specs(pose_names: list[str], role: str = "pluck", fret_map: dict[int, list[i
             "description": (
                 "Pluck the live string once: the arm goes above the string, lowers the pick to "
                 "pluck_start pushed depth_mm into the string, strokes to pluck_end at `speed`, and "
-                "returns above the string. Returns the audio score and a fresh camera frame."
+                "returns above the string. Returns arm state."
+                + pluck_feedback + image_feedback
             ),
             "parameters": _obj({
                 "depth_mm": {"type": "number", "description": f"0 to {MAX_DEPTH_MM:g}. How far past the recorded pluck line the pick goes. Too shallow = silent, too deep = snag."},
@@ -79,12 +77,16 @@ def specs(pose_names: list[str], role: str = "pluck", fret_map: dict[int, list[i
     return instrument + [
         {
             "name": "move_to",
-            "description": "Move the arm to a named, hand-recorded pose. Returns arm state and a camera frame.",
+            "description": "Move the arm to a named, hand-recorded pose. Returns arm state." + image_feedback,
             "parameters": _obj({"pose": {"type": "string", "enum": pose_names}, "speed": speed}),
         },
         {
             "name": "look",
-            "description": "Take a fresh camera frame without moving.",
+            "description": (
+                "Read current arm state without moving."
+                + (" Also request a camera snapshot when available." if use_camera
+                   else " Camera input is disabled; this returns state only.")
+            ),
             "parameters": _obj({}),
         },
         {
@@ -103,7 +105,7 @@ def _range(args: dict, key: str, lo: float, hi: float) -> float:
 
 
 class Toolbox:
-    def __init__(self, arm: Arm, mic=None, target_note: str = "A2", use_camera: bool = True,
+    def __init__(self, arm: Arm, mic=None, target_note: str = "A2", use_camera: bool = False,
                  pluck_prompt=None):
         # target_note: pluck arm's live string. The fretting arm derives its note from string + fret.
         self.arm, self.mic, self.target, self.use_camera = arm, mic, target_note, use_camera
@@ -111,6 +113,7 @@ class Toolbox:
         self.finished: str | None = None
 
     def _frame(self) -> tuple[bytes | None, str | None]:
+        """No relay access without explicit camera opt-in."""
         if not self.use_camera:
             return None, None
         try:
@@ -129,7 +132,7 @@ class Toolbox:
                 if self.mic:
                     out["score"] = score(self.mic, timing["t_cmd"], self.target)
                 else:
-                    out["score"] = "no microphone this session - judge from the camera"
+                    out["score"] = NO_AUDIO_MESSAGE
                 rec["timing"] = timing
             elif call.name == "fret":
                 string, n = int(call.args["string"]), int(call.args["fret"])
@@ -141,7 +144,7 @@ class Toolbox:
                     self.pluck_prompt(expected)
                     out["score"] = wait_for_pluck(self.mic, expected)
                 else:
-                    out["score"] = "no microphone this session - judge from the camera"
+                    out["score"] = NO_AUDIO_MESSAGE
                 rec["timing"] = timing
             elif call.name == "release":
                 rec["timing"] = self.arm.release(_range(call.args, "speed", 0.2, 1.0))

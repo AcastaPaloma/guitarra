@@ -5,6 +5,9 @@
 and gaps are in [STATUS.md](STATUS.md). No replacement hardware, simulated performers,
 or source-code transfer from the separate `astra-guitar` experiment is required.
 This document owns local planning; [FINETUNING.md](FINETUNING.md) is deferred research.
+**Camera input is off by default and not required:** planning uses known poses, controller
+state, measured timing, and available audio feedback. `--camera` is optional diagnostic
+opt-in only; `--no-camera` explicitly retains the default.
 
 ## 1. Decision
 
@@ -23,9 +26,11 @@ pretrained audio evaluator and planner revision between attempts, without weight
 Telemetry measures mechanical execution; it does not establish clean notes or audible
 onsets. Audio-model judgments are separate assessments, not exact timing/contact truth.
 
-The old agent loop still contains optional microphone code. This documentation does not
-change its runtime defaults or prompts; it is not the new planner/data-collection runner.
-Do not use its “judge from the camera” text as evidence of an acoustic result.
+The agent now defaults to camera off and describes enabled inputs accurately. Its local
+microphone default is unchanged; no-mic results explicitly report unavailable acoustic
+measurement. The old camera-as-audio fallback is removed. This is still not a complete
+phrase planner/data-collection runner, and neither images nor commanded positions prove
+what the guitar sounded like.
 
 ## 2. What the current source actually does
 

@@ -1,151 +1,132 @@
-# Baseten integration — pretrained planner scaffold
+# Baseten planner — Kimi K3, live managed inference
 
-**Status: client, custom server adapter, and configuration exist; live validation is pending.**
-This is pretrained inference setup, not a fine-tune. The target is
-[bounded guitar rehearsal](../DESIGN.md) with local motion authority and optional separate
-audio-model assessment. No deployment or hardware validation is claimed by this README.
+**Active model: `moonshotai/Kimi-K3`, reasoning effort `high`.** This is a Baseten-hosted
+Model API, not an OpenAI service and not our own Truss deployment. No GPU build, dedicated
+model ID, or weight training is needed. Camera remains off by default.
 
-## 1. Existing pieces and validation boundary
+A live native tool-call round trip passed on 2026-09-19: `look` → synthetic state → `done`,
+2.27 seconds across two requests. See [connection-check.json](connection-check.json).
+No robot, camera, microphone, audio upload, or tool dispatcher was used. This demonstrates
+provider/continuation compatibility, **not** physical qualification or guitar skill.
 
-- [`agent/backends/baseten.py`](../agent/backends/baseten.py) is a direct standard-library
-  HTTP client for a **custom `/predict` contract**. It does not require the OpenAI SDK.
-- [`baseten_guitar_agent/config.yaml`](baseten_guitar_agent/config.yaml) names
-  `Qwen/Qwen2.5-VL-7B-Instruct`, vLLM dependencies, and an A10G resource configuration.
-- [`model/model.py`](baseten_guitar_agent/model/model.py) was added concurrently during this
-  review. It supplies Truss `load`/`predict`, constructs the guitar prompt, passes the latest
-  image to Qwen, and normalizes generated JSON/tool calls into the client's response shape.
+The next milestone is now working: [fake orchestration](../orchestration/README.md) runs
+real Baseten decisions through the existing `Motions`/`FakeArm` tools and a synthetic pick.
+All four initial workflow cases passed live. The [web console](../web/README.md) now provides
+prompt/note editing, fake run controls, and history at http://127.0.0.1:8787. A browser-submitted
+Baseten workflow also passed. Audio work is parked; no audio call is needed.
 
-**These files are not evidence of a successful deployment or end-to-end test.** Verify
-model/dependency loading, the exact payload/response, images, truncation/errors, and local
-admission before physical use. Do not silently mix this custom `/predict` contract with
-hosted Model APIs or native Chat Completions shapes; the adapter is the explicit translation.
+```bash
+# From guitar/:
+.venv/bin/python -m orchestration --allow-inference
+```
 
-## 2. Capabilities and product claims
+## Configuration
 
-Qwen2.5-VL is an image/text model. The current client sends JPEGs and text, **not raw audio**.
-An audio score supplied by local code is not the model listening to a clip. For the optional
-critic path, select a verified audio-capable endpoint and implement recording/export and
-assessment handling separately; see [sensing](../sense/README.md).
+Put these settings in `guitar/.env` (ignored by Git). Existing nonempty environment values
+win, then `guitar/.env`, then the repository-root `.env`. `BASETEN` remains a key alias.
 
-The config describes a pretrained checkpoint, not guitar-specific trained weights. GPU
-serving is not weight training. [FINETUNING.md](../FINETUNING.md) is deferred research;
-H100 fine-tuning, LoRA, or a new classifier are not deployment prerequisites.
+```dotenv
+BASETEN_API_KEY=your_key_here
+BASETEN_MODEL=moonshotai/Kimi-K3
+BASETEN_REASONING_EFFORT=high
+BASETEN_MAX_TOKENS=8192
+BASETEN_TIMEOUT_S=180
+```
 
-The CLI's current default remains `claude`; use `--backend baseten` explicitly for Baseten
-requests. Astra/Claude traffic is not Baseten traffic, and a Baseten-hosted Astra endpoint
-is not assumed.
+The key is never sent in model context. The client uses:
 
-## 3. Current client configuration
+- URL: `https://inference.baseten.co/v1/chat/completions`
+- Authentication: `Authorization: Bearer <Baseten key>`
+- Native Chat Completions `messages`, `tools`, and `tool_calls`.
 
-Keys may be supplied via the environment; the client also reads `guitar/.env` then the
-repository-root `.env`, without replacing existing nonempty environment values. Never
-commit, print, screenshot, or send credentials in model context.
+**`BASETEN_MODEL_ID`, `BASETEN_MODEL_URL`, and `BASETEN_ENV` are not used by this path.**
+Those settings belonged to the earlier custom Truss adapter. The exact managed model name
+is the slug above. An empty list of private deployments does not mean Model APIs are unavailable.
 
-| Setting | Current client behavior |
+## Commands — from the repository root
+
+```bash
+# Installs the extra local JSON Schema validator, without installing a GPU runtime.
+guitar/.venv/bin/python -m pip install 'jsonschema>=4.23,<5'
+
+# Configuration only; no inference or devices.
+guitar/.venv/bin/python guitar/scripts/baseten_setup.py status
+
+# Read-only managed catalog lookup using .env credentials.
+guitar/.venv/bin/python guitar/scripts/baseten_setup.py models
+
+# Two billed, synthetic tool-call requests. No devices and no tool dispatch.
+guitar/.venv/bin/python guitar/scripts/baseten_setup.py smoke --yes
+```
+
+No `truss login` or `truss push` is required. The script works from any current directory;
+from `guitar/`, use `.venv/bin/python scripts/baseten_setup.py ...`.
+The agent CLI now defaults to `--backend baseten`; `--model` overrides the **managed slug**.
+Use `--fake-arm --no-mic` for device-free agent work. The legacy CLI still defaults to real
+hardware when an arm session is started; do not use it as a provider connectivity check.
+
+## What the model does
+
+```text
+Goal + qualified capabilities + state + attempt history + text audio summaries
+    → Kimi K3 on Baseten
+    → one proposed native tool call
+    → local schema validation, motion guards, and execution authority
+```
+
+This is pretrained inference and in-context plan revision, not fine-tuning. Numerical
+scheduling, path selection, readiness, gripper/protection policy, and attempt budgets remain
+local. [DESIGN.md](../DESIGN.md), [STATUS.md](../STATUS.md), and [AGENTS.md](../../AGENTS.md)
+retain authority over scope and physical use.
+
+The client rejects unknown tools, malformed/duplicate-key/nonfinite argument JSON,
+schema violations, repeated call IDs, multi-call responses, and truncated responses before
+returning any call to the dispatcher. It preserves native call IDs and provider continuation
+fields. It does not repair bad arguments or automatically retry/fall back to another model.
+These checks are not a physical safety certificate or an independent hardware watchdog.
+
+## Audio and optional images
+
+- **Current planner input is text/state.** Local microphone pitch/onset/level summaries,
+  when enabled, are text observations—not evidence the planner heard a recording.
+- **Kimi K3 is not documented as accepting raw audio on Baseten.** It supports text and
+  optional image inputs; no image is fetched/sent without explicit camera opt-in.
+- The optional **file-based evaluator is now implemented** in `audio.py`, with explicit
+  upload consent, PCM16 WAV validation/resampling, a bounded assessment schema, and no tools.
+  It is not automatically invoked by the planner or legacy mic loop.
+- Full `thinkingmachines/inkling` remains the separate audio candidate. Its documented audio
+  request **still timed out**, including a one-second synthetic WAV probe. Live audio ingestion
+  and guitar critique are not verified; failures return `status: unavailable, assessment: null`.
+  No automatic fallback is configured.
+- See [AUDIO.md](AUDIO.md) for local inspection/upload commands. A selected real recording,
+  a responding endpoint, assessment review, and deliberate planner integration are still needed.
+  ASR is not guitar critique.
+
+## Files and the older scaffold
+
+| File | Purpose |
 |---|---|
-| `BASETEN_API_KEY` | Primary credential; `BASETEN` is an alias |
-| `BASETEN_MODEL_ID` | Baseten deployment/model ID; the shared CLI's `--model` also maps to this ID, not a Hugging Face slug |
-| `BASETEN_ENV` | Defaults to `development` |
-| `BASETEN_MODEL_URL` | Explicit URL override |
-| `BASETEN_TIMEOUT_S` | Defaults to 180 seconds; not a total attempt/physical-hold deadline |
+| `baseten.py` | Shared .env loader and direct HTTP managed-API transport; no device imports |
+| `../agent/backends/baseten.py` | Active planner adapter: native tools, argument validation, continuation |
+| `../scripts/baseten_setup.py` | Status, catalog lookup, and synthetic connection check |
+| `audio.py`, `../scripts/evaluate_audio.py` | Opt-in WAV evaluator; file normalization and structured feedback, no device access |
+| `AUDIO.md`, `audio-connection-check.json` | Audio setup and truthful record of the timed-out synthetic audio probe |
+| `connection-check.json` | Non-secret evidence of the live synthetic tool round trip |
+| `MODEL_SELECTION.md` | Current quality-first selection and capability boundaries |
+| `baseten_guitar_agent/` | **Inactive, unvalidated** Qwen2.5-7B custom Truss recipe retained for reference |
+| `../agent/backends/baseten_custom.py` | Previous custom `/predict` contract; explicit `baseten-custom` backend only |
 
-Without an explicit URL, the client constructs
-`https://model-<id>.api.baseten.co/<environment>/predict` and sends `Authorization: Api-Key ...`.
-That describes current code, not a universal endpoint/auth recipe. Confirm the actual
-Baseten-generated URL/auth for the selected deployment before calling it. In particular,
-changing the URL alone does not convert the body to `/v1/chat/completions` format.
+The old `/predict` contract is not native Chat Completions and is not used as a fallback.
+Do not push that older recipe expecting it to deploy Kimi K3. Dedicated deployment is a
+separate decision; the hackathon path is the already-hosted flagship API.
 
-## 4. Custom client/server contract
+## Sources
 
-The client sends the whole accumulated conversation each turn. Example **shape only**:
+- [Model APIs and supported models](https://docs.baseten.co/inference/model-apis/overview)
+- [Reasoning parameters](https://docs.baseten.co/inference/model-apis/reasoning)
+- [Native tool calling](https://docs.baseten.co/inference/function-calling)
+- [Audio models and input requirements](https://docs.baseten.co/inference/model-apis/audio)
 
-```json
-{
-  "session_id": "example-session",
-  "system": "Example role/task instructions",
-  "tools": [
-    {"name": "look", "description": "Observe without motion", "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}}
-  ],
-  "messages": [
-    {"role": "user", "text": "Synthetic state: ready"},
-    {"role": "assistant", "text": "Inspect first", "tool_calls": [{"id": "call_1", "name": "look", "args": {}}]},
-    {"role": "tool", "tool_call_id": "call_1", "name": "look", "text": "Synthetic observation", "is_error": false}
-  ],
-  "generation": {"effort": "medium"}
-}
-```
-
-User/tool messages can additionally contain `image_jpeg_b64`. The current assistant-history
-entry uses `args` from the local dataclass; it is not native OpenAI tool-call serialization.
-The current server translates this into a prompt containing the tool schemas and the last
-24 transcript entries, with the most recent image. There is no raw audio field. The client
-sends `generation.effort`, but the server currently reads only max-token/temperature/top-p
-settings from `generation`; do not claim that the shared CLI's effort flag changes this model.
-
-Expected response, directly or inside `model_output` (illustrative, not a real result):
-
-```json
-{
-  "text": "Request one observation before proceeding.",
-  "tool_calls": [{"id": "call_2", "name": "look", "arguments": {}}],
-  "stop": "tool_use",
-  "usage": {}
-}
-```
-
-Do not return stock `choices[0].message` and assume this client parses it. Current JSON
-formatting is requested in the prompt, not guaranteed by constrained decoding. The parser
-can drop malformed calls or substitute empty arguments. Finish/refusal/truncation, input
-bounds, and normalization need explicit tests; local semantic validation is still required.
-The client sends context; a session ID is not server-side learning or persistent memory.
-
-## 5. Validation before any physical use
-
-1. Test the implemented custom server/client contract with mocks, without keys or hardware.
-2. Pin/review model/runtime dependencies, input limits, and remote-code requirements.
-3. Approve account access and serving spend before deployment; idle GPUs can bill.
-4. Deploy through the selected supported Baseten/Truss workflow and verify health **and**
-   the exact synthetic request/response, not just that a model page exists.
-5. Use a non-motion request with no media upload first. Only after that, test fake execution.
-6. Camera/audio upload and real hardware are separate opt-ins, with the local qualification
-   gates in [STATUS.md](../STATUS.md) and [operator instructions](../../AGENTS.md).
-
-A provider-only diagnostic, **only after a matching endpoint is working and spend approved**:
-
-```python
-# Run from guitar/ using its environment; this makes a billed inference request.
-# It does not connect an arm, capture media, or dispatch any returned tool.
-from agent.backends.baseten import BasetenBackend
-
-backend = BasetenBackend()
-turn = backend.begin(
-    system="Synthetic endpoint test. End the request; no robot is connected.",
-    tool_specs=[{
-        "name": "done",
-        "description": "Finish the synthetic test",
-        "parameters": {
-            "type": "object",
-            "properties": {"reason": {"type": "string"}},
-            "required": ["reason"],
-            "additionalProperties": False,
-        },
-    }],
-    text="Return done with a short reason.",
-    image_jpeg=None,
-)
-print(turn.stop, [call.name for call in turn.calls])
-```
-
-The previous pluck-role fake smoke command required a `pluck_arm` map that is not supplied.
-Do not claim it is a ready-made test or switch to real hardware to bypass that error.
-A valid provider response alone does not establish safe execution or improvement from rehearsal.
-
-## References
-
-- [Baseten model development](https://docs.baseten.co/development/model/overview)
-- [Custom model class](https://docs.baseten.co/development/model/model-class)
-- [Model APIs](https://docs.baseten.co/inference/model-apis/overview)
-- [Audio-capable endpoints](https://docs.baseten.co/inference/model-apis/audio)
-
-These document platform options, not team entitlement, deployment success, model suitability,
-or a verified audio critique of this guitar.
+The live catalog listed Kimi K3 at $3/million input tokens and $15/million output tokens
+at setup time; reasoning contributes to output usage. Prices/availability can change.
+No dedicated idle GPU was provisioned.

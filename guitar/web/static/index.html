@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Guitarra · Operator console</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Guitarra home"><span class="brand-mark">g</span><span>guitarra<span class="brand-sub">OPERATOR CONSOLE</span></span></a>
+    <div class="top-status"><span id="key-status" class="badge neutral">Loading config</span><span class="badge amber">Hardware locked</span></div>
+  </header>
+  <main class="shell">
+    <section class="page-heading"><div><p class="eyebrow">BASETEN × GUITAR ORCHESTRATION</p><h1>Direct the workflow.</h1><p class="muted">Real inference. Fake execution. Every decision on the record.</p></div><div class="model-label"><span class="muted small">SERVER-SIDE MODEL</span><strong id="model-name">—</strong><span class="small muted">Camera off · audio parked</span></div></section>
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+    <div class="workspace">
+      <aside class="sidebar">
+        <section class="panel builder">
+          <div class="section-heading"><h2>Run builder</h2><span class="badge teal">Fake only</span></div>
+          <form id="run-form">
+            <label for="scenario">Workflow</label>
+            <select id="scenario" name="scenario"><option>Loading…</option></select>
+            <div id="preset-notes" class="note-chips" aria-label="Expected notes"></div>
+            <p id="scenario-help" class="small muted"></p>
+            <div id="custom-editor" hidden>
+              <div class="field-heading"><label>Expected note sequence</label><button id="add-note" type="button" class="text-button">+ Add note</button></div>
+              <div id="note-rows"></div>
+              <p class="small muted">String 6 = low E, 1 = high E. Saved fret targets: 1–9. Other frets test rejection. Max 12 notes.</p>
+              <label class="check-row"><input id="inject-fault" type="checkbox"><span>Inject an uncertain fret failure</span></label>
+            </div>
+            <label for="prompt">Your prompt <span class="muted">/ optional direction</span></label>
+            <textarea id="prompt" rows="5" maxlength="8000" placeholder="Use the fewest necessary calls. Reuse the held fret for repeats. Explain your decisions briefly."></textarea>
+            <p class="small muted">Expected notes above remain the scoring target. Prompts cannot unlock hardware or change tool limits. Never paste credentials here.</p>
+            <details class="advanced"><summary>Inference & run budget</summary><div class="form-grid">
+              <div><label for="effort">Reasoning</label><select id="effort"><option value="low">Low</option><option value="high" selected>High</option><option value="max">Max</option></select></div>
+              <div><label for="max-calls">Tool-call cap</label><input id="max-calls" type="number" min="1" max="40" value="20"></div>
+              <div><label for="seconds">Time budget (s)</label><input id="seconds" type="number" min="10" max="600" value="180"></div>
+              <div><label for="max-tokens">Output token cap</label><input id="max-tokens" type="number" min="512" max="8192" value="4096" step="512"></div>
+            </div><p class="small muted">Requests are paced across runs. Pausing still uses the wall-time budget. Token cap includes reasoning.</p></details>
+            <label class="check-row consent"><input id="allow-inference" type="checkbox" required><span>Use my Baseten credits for this run.<small>Tools remain fake; this app does not access devices.</small></span></label>
+            <button id="start-run" class="button primary" type="submit" disabled>Run with Baseten <span>↗</span></button>
+          </form>
+        </section>
+        <section class="panel history-panel"><div class="section-heading"><h2>Run history</h2><button id="refresh-history" class="text-button" type="button">Refresh</button></div><button id="active-run-link" class="active-run-link" type="button" hidden>Return to active run →</button><div id="history-list" class="history-list"><p class="muted small">Loading local runs…</p></div></section>
+      </aside>
+      <div class="main-column">
+        <section class="panel live-panel">
+          <div class="section-heading"><div><p class="eyebrow">EXECUTION MONITOR</p><h2 id="run-title">Ready when you are</h2></div><span id="run-status" class="badge neutral">Idle</span></div>
+          <div class="metrics"><div><span>Tool calls</span><strong id="metric-tools">0</strong></div><div><span>Mock plucks</span><strong id="metric-notes">0</strong></div><div><span>Virtual seconds</span><strong id="metric-time">0.00</strong></div><div><span>Total tokens</span><strong id="metric-tokens">0</strong></div></div>
+          <div class="arm-grid">
+            <article id="fret-card" class="arm-card"><div class="arm-icon">F</div><div><span class="eyebrow">FRET ARM · FAKEARM</span><h3 id="fret-state">Not started</h3><p id="fret-detail" class="muted small">Existing motion code and saved pose map</p></div></article>
+            <article class="arm-card"><div class="arm-icon pick">P</div><div><span class="eyebrow">PICK ARM · SYNTHETIC</span><h3 id="pick-state">Not started</h3><p class="muted small">State fixture; no physical picking map</p></div></article>
+          </div>
+          <div class="run-controls"><div><button id="pause-run" type="button" class="button secondary" disabled>Pause</button><button id="resume-run" type="button" class="button secondary" disabled>Resume</button><button id="stop-run" type="button" class="button danger" disabled>Stop fake run</button></div><p class="small muted">Cooperative controls, not a hardware E-stop. An in-flight API request may finish; stopped runs discard pending calls.</p></div>
+        </section>
+        <section class="panel timeline-panel"><div class="section-heading"><h2>Tool-call timeline</h2><span class="small muted" id="event-count">Waiting for a run</span></div><div id="timeline" class="timeline" aria-live="polite"><div class="empty-state"><span class="empty-glyph">⌁</span><h3>See the model coordinate.</h3><p>Start a workflow or select a previous run.<br>Decisions, calls, state changes and rejections appear here.</p></div></div></section>
+        <section id="results-panel" class="panel" hidden><div class="section-heading"><h2>Workflow evaluation</h2><span id="result-status" class="badge neutral">—</span></div><div id="result-summary"></div><div id="check-list" class="check-list"></div><p class="small muted">Checked against recorded fake events—not the model’s claim of success. Physical timing, sound, collisions and thermal safety are not evaluated.</p></section>
+        <section class="panel"><div class="section-heading"><h2>Logs & tool contract</h2><span class="small muted">Local · Git-ignored</span></div><p id="log-path" class="path-text">Select a run to inspect its records.</p><div id="download-links" class="download-links"></div><details class="tool-contract"><summary>Available tool schemas <span id="tool-count"></span></summary><pre id="tool-schemas"></pre></details></section>
+        <section class="panel hardware-panel"><div class="section-heading"><h2>Before real hardware</h2><span class="badge amber">Not commissioned</span></div><p>Passing these workflows is not permission for autonomous arm operation. This app has no hardware adapter or unlock switch.</p><ul id="hardware-blockers"></ul><p class="small muted">Next hardware step: operator-reviewed configuration and protection fixes, then one short supervised motion at a time. Keep tool grippers clamped during normal operation; thermal/electrical protection takes priority.</p></section>
+      </div>
+    </div>
+    <footer>Guitarra / local operator console <span>Baseten inference · local validation · fake execution</span></footer>
+  </main>
+</body>
+</html>

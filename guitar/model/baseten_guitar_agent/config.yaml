@@ -1,9 +1,12 @@
-model_name: guitarra-qwen2p5-vl-7b-agent
+# INACTIVE reference recipe. The active planner is managed moonshotai/Kimi-K3;
+# see ../README.md. Do not push this expecting to deploy Kimi K3.
+model_name: guitarra-qwen2p5-7b-planner
 python_version: py311
 
-# Baseten/Truss GPU deployment for the robot-guitar model brain. The robot
-# hardware is never controlled from Baseten; this model only proposes tool calls
-# that the local agent loop validates and executes.
+# Baseten/Truss GPU deployment for the robot-guitar text/state planner.
+# The robot hardware is never controlled from Baseten; this model only proposes
+# tool calls that the local agent loop validates and executes. Camera input is
+# off by default and is not required for this deployment.
 resources:
   use_gpu: true
   accelerator: A10G
@@ -13,29 +16,28 @@ resources:
 requirements:
   - vllm>=0.7.3
   - transformers>=4.49.0
-  - qwen-vl-utils>=0.0.8
-  - pillow>=10.0.0
 
 environment_variables:
-  HF_MODEL_ID: Qwen/Qwen2.5-VL-7B-Instruct
+  HF_MODEL_ID: Qwen/Qwen2.5-7B-Instruct
   MAX_MODEL_LEN: "8192"
-  MAX_NEW_TOKENS: "768"
-  TEMPERATURE: "0.2"
+  MAX_NEW_TOKENS: "512"
+  TEMPERATURE: "0.1"
   TOP_P: "0.9"
   GPU_MEMORY_UTILIZATION: "0.90"
+  GUIDED_JSON: "1"
 
-# Optional for private/gated Hugging Face models. Qwen2.5-VL-7B-Instruct is
-# public, so this can stay unset unless we switch models.
+# Optional for private/gated Hugging Face models. Qwen2.5-7B-Instruct is public,
+# so this can stay unset unless we switch models.
 secrets:
   hf_access_token: null
 
 model_metadata:
   example_model_input:
     session_id: local-smoke-test
-    system: "You control the safe local robot tools."
+    system: "You control the safe local robot tools. Camera is disabled."
     tools:
       - name: look
-        description: Take a fresh camera frame without moving.
+        description: Read current arm state without moving; camera input is off by default.
         parameters:
           type: object
           properties: {}
@@ -52,6 +54,6 @@ model_metadata:
           additionalProperties: false
     messages:
       - role: user
-        text: "Session start. Current observation: {\"arm\": {\"at\": \"ready\"}}"
+        text: "Session start. Current observation: {\"arm\": {\"at\": \"ready\"}, \"inputs\": {\"camera\": false}}"
     generation:
       effort: medium

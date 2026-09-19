@@ -4,6 +4,10 @@ Use the existing physical guitar rig, not replacement arms or a new bus topology
 from an old example. This guide is operator-owned; software documentation is not motion
 approval. [../AGENTS.md](../AGENTS.md) is authoritative for clamp/thermal instructions.
 
+**Guitar camera input is off by default.** The normal planner uses known poses/arm telemetry
+and available audio feedback. `--camera` is optional diagnostic opt-in, not a replacement
+for operator supervision or physical qualification; `--no-camera` keeps the default.
+
 ## 1. Recorded configuration versus current verification
 
 | Item | Repository/operator evidence | Still required before a new run |

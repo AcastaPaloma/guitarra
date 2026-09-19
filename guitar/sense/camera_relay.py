@@ -1,13 +1,14 @@
-"""Camera relay: grab frames continuously, serve the latest one over localhost HTTP.
+"""Optional diagnostic relay: explicitly running this script opens a local camera.
 
-Run it from Terminal.app (which can get macOS camera permission); anything else - the Astra
-loop, scripts, Claude - reads frames over HTTP without needing camera access itself.
+Guitar agent camera input is OFF by default. The agent never starts this utility;
+only --camera opts it into requests to an already running relay. Run this utility
+from Terminal.app only when camera access is explicitly wanted/approved.
 
     python sense/camera_relay.py --index 1          # 1 = Camo Camera (iPad) on this Mac
 
 Endpoints (127.0.0.1 only):
     /frame.jpg   latest frame, full resolution
-    /astra.jpg   latest frame as Astra gets it: 768 px wide, JPEG q70 (SETUP.md §2)
+    /astra.jpg   optional agent snapshot: 768 px wide, JPEG q70 (historical route name)
     /stream      MJPEG live view - open in a browser to aim the camera
     /health      JSON: resolution, fps, age of latest frame
 """

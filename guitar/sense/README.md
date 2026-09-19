@@ -1,22 +1,39 @@
 # Sensing — existing measurements and optional model assessment
 
 Current scope is [model-guided guitar rehearsal](../DESIGN.md), not a newly trained sound
-classifier. Use camera observations and, when enabled with consent, real attempt recordings.
-A pretrained audio-capable evaluator can critique a clip; the planner can revise its next
-approved plan without changing either model's weights.
+classifier. **Camera input is off by default and is not needed for this plan.** Use known
+arm state and available audio feedback. A pretrained audio-capable evaluator can critique
+a consented real attempt recording; the planner revises its next approved plan without
+changing either model's weights. Vision is an optional diagnostic, not a required model capability.
 
 ## 1. What is implemented
 
 | File | Actual behavior |
 |---|---|
-| [`camera_relay.py`](camera_relay.py) | Opens an OpenCV camera and serves localhost MJPEG/JPEG/health endpoints. Has top-level device startup; do not import it as a test helper. |
-| [`camera.py`](camera.py) | Fetches relay health and one reduced JPEG from `/astra.jpg`, rejecting an old frame according to its age check. The route name is historical, not provider-specific. |
+| [`camera_relay.py`](camera_relay.py) | Optional utility; explicitly running it opens a selected local camera and serves localhost MJPEG/JPEG/health. The agent never starts it. Has top-level startup; do not import as a test helper. |
+| [`camera.py`](camera.py) | Optional relay client; called by the agent only with explicit `--camera`/`use_camera=True`. Default sessions never probe it. `/astra.jpg` is a historical route name, not a provider requirement. |
 | [`mic.py`](mic.py) | 44.1 kHz mono ring buffer plus local level/onset/YIN-pitch estimates; not an audio-language model or trained guitar classifier. |
+| [`../model/audio.py`](../model/audio.py) | Separate opt-in file evaluator: PCM16 WAV validation/resampling, upload, structured assessment. No capture/devices/tools; live Inkling endpoint remains unavailable. |
 
 `mic.py` and `camera.py` already exist. Old references to missing `sense/calibrate.py`,
 separate `onsets.py`, `timing.py`, or a completed multi-strum packet pipeline are not the
-current implementation. The agent sends a snapshot and text/tool feedback, not a continuous
-raw video/audio stream. Its recorder saves JSONL and JPEGs, not per-attempt WAV files.
+current implementation. Default agent requests contain text/state and available local audio
+estimates, with no images or video. JPEGs can be attached/recorded only for opted-in snapshots;
+the recorder does not yet export per-attempt WAV files for a pretrained audio evaluator.
+
+### Explicit camera diagnostic mode
+
+`--camera` opts the guitar agent into snapshot requests from a separately started relay.
+`--no-camera` explicitly keeps the default off state; the two flags are mutually exclusive.
+`Toolbox` also defaults to no camera, and `look()` returns arm state only in that mode.
+Prompts/specs do not claim visual observations when the camera is disabled. These flags do
+not stop other camera programs or turn an absent relay into a running capture service.
+The relay's index-1/Camo-iPad setting is a historical device choice, not a guaranteed camera
+identity on every machine or a setup requirement.
+
+Microphone capture is separate and still enabled by the old CLI unless `--no-mic` is passed.
+That default has not changed; use `--no-mic` for offline runs. The prompt/tool output reports
+missing audio explicitly instead of suggesting the camera can judge sound.
 
 ## 2. Existing acoustic heuristic versus the proposed evaluator
 
@@ -31,12 +48,13 @@ These are useful development measurements, but their explanatory strings are hyp
 - A pitch mismatch does not determine which mechanical adjustment is safe.
 - The old six-string “5–6 onsets means clean” rule is not a validated guitar metric.
 
-The proposed **audio-model evaluator** is a separate integration: encode/export a consented
-attempt clip, supply the intended phrase/rubric, call a verified audio-capable endpoint,
-and retain its observations/uncertainty. It does not require training a classifier first.
-The current Qwen2.5-VL/Baseten scaffold accepts images/text, not raw audio; its client has
-no audio field. Do not claim the planner listened to a recording when it only received a
-local score summary.
+An explicit **file-based audio evaluator** now exists outside the capture path. It accepts
+one selected PCM16 WAV with upload consent, converts it to 16 kHz mono, supplies a fixed
+rubric and expected phrase, and validates the returned assessment. See [AUDIO.md](../model/AUDIO.md).
+Inkling still timed out on a synthetic audio request; successful raw-audio processing and
+musical assessment are not yet established. No model fine-tuning or classifier training is involved.
+The active Kimi planner still receives text/state, not recordings. No report is automatically
+fed into the rehearsal loop yet. Do not claim the planner listened when it received a summary.
 
 ## 3. Minimum new evaluator contract
 
@@ -48,10 +66,10 @@ The evaluator has **no motion tools**. It must not instruct arbitrary pressure, 
 grip, or calibration changes. A missing note may justify inspection, not a confident
 mechanical diagnosis. The planner chooses only actions that the local controller permits.
 
-If an audio-capable endpoint also accepts images, test the exact combined request before
-using it; support for each modality individually is not proof the combination works.
-Camera/video alone cannot establish acoustic quality or contact force. ASR is not a
-substitute for judging guitar sound.
+No image input is required for the audio evaluator. If an explicitly requested future
+vision experiment combines modalities, test that exact request separately; it does not
+change the default camera-off policy. Camera/video cannot establish acoustic quality or
+contact force. ASR is not a substitute for judging guitar sound.
 
 ## 4. Capture and timing gaps to address
 

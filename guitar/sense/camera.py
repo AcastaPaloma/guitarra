@@ -1,4 +1,8 @@
-"""Frames from sense/camera_relay.py (which runs in Terminal because it holds camera permission)."""
+"""Optional camera-relay client; guitar agent camera input is OFF by default.
+
+Call only after explicit camera opt-in. Importing this module does not open a device
+or contact the relay. See sense/README.md for the separate diagnostic capture path.
+"""
 import json
 import urllib.request
 
@@ -11,7 +15,7 @@ class CameraError(Exception):
 
 
 def grab(relay: str = RELAY) -> bytes:
-    """Latest frame as Astra/Claude get it: 768 px wide JPEG. Refuses stale frames."""
+    """Fetch an explicitly requested 768 px JPEG snapshot; refuse stale relay frames."""
     try:
         health = json.load(urllib.request.urlopen(f"{relay}/health", timeout=2))
         if health["age_s"] is None or health["age_s"] > MAX_AGE_S:

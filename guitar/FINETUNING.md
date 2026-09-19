@@ -3,6 +3,8 @@
 **The current guitar plan does not require fine-tuning.** Build and evaluate the
 [closed-loop rehearsal system](REHEARSAL_LOOP.md) with fixed pretrained models first.
 [DESIGN.md](DESIGN.md) owns that decision; [STATUS.md](STATUS.md) separates source from plans.
+**Camera input is off by default.** Normal rehearsal uses state/text and optional audio
+assessment; no vision model, camera dataset, or new audio classifier is required.
 
 ## What we are doing now
 
@@ -18,7 +20,7 @@ not assumed just because the model changed its answer.
 
 | Activity | Weight fine-tuning? |
 |---|---|
-| Supply a new camera observation or recording | No; inference input |
+| Supply fresh arm state or an approved audio recording | No; inference input |
 | Include previous attempts in the prompt | No; context update |
 | Change an approved phrase/profile or save a successful plan | No; application state |
 | Run a pretrained model on a Baseten GPU | No; inference serving |

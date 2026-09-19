@@ -1,0 +1,16 @@
+{
+  "checked_at_utc": "2026-09-19T13:48:45.293541+00:00",
+  "provider": "baseten",
+  "model": "thinkingmachines/inkling",
+  "kind": "synthetic_audio_connectivity_probe",
+  "input_format": "mono PCM16 WAV, 16000 Hz, 1 second",
+  "source": "synthetic_silence",
+  "hardware_connected": false,
+  "camera_used": false,
+  "microphone_used": false,
+  "user_media_uploaded": false,
+  "synthetic_audio_submitted": true,
+  "status": "unavailable",
+  "error": "Baseten connection failed or timed out; no automatic retry",
+  "elapsed_s": 30.08
+}

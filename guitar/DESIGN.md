@@ -10,6 +10,11 @@ Use the **same physical two-arm guitar rig** with defined, qualified fret/press,
 and pluck tools. The agent chooses musical actions and revises its next attempt from
 observations. It does not discover unrestricted motor control from scratch.
 
+**Camera input is OFF by default and not required.** The normal inputs are the goal/score,
+known calibrated capabilities, current arm state, and available audio feedback. We are not
+asking the model to locate strings/frets visually. `--camera` is optional diagnostic opt-in;
+`--no-camera` explicitly keeps the default. Do not start a relay or attach images implicitly.
+
 ```text
 Goal + supported capabilities + current state + attempt history
                             |
@@ -60,9 +65,11 @@ is not a definitive mechanical diagnosis or exact millisecond measurement.
 | Local compiler/scheduler | Feasibility, approved paths/profiles, numeric timing, arm resource ordering | Invented acoustic success or silent tempo changes |
 | Local controller/operator | Execution, current readiness, stop/thermal behavior, physical qualification | Waiting on a model before respecting a fault/protection condition |
 
-The evaluator may share a model with the planner only if that exact endpoint supports and
-passes the required combined-input tests. Otherwise use a separate audio-capable endpoint.
-The current Qwen2.5-VL deployment scaffold is image/text, not a raw-audio evaluator.
+The planner needs text/state input and structured decisions, not vision. The optional audio
+evaluator needs actual audio support. They may share a model only if the endpoint passes
+those input tests; otherwise use separate endpoints. The current managed Kimi K3 planner
+is not a raw-audio evaluator on Baseten. A camera or vision-capable model is not a requirement
+for model selection.
 
 ## 4. Baseten and other providers
 
@@ -96,10 +103,16 @@ See [model/README.md](model/README.md) for the actual scaffold and unresolved se
 
 ## 6. Inputs, observations, and evidence
 
-Camera snapshots/short clips and optional audio capture require consent and fresh timestamps.
-Current code sends snapshots and a local acoustic summary, not continuous audio/video to
-an omni model. Adding an external audio evaluator is a separate integration task, not a
-fine-tune. Bad/missing capture should produce uncertainty, not an assumed missed pluck.
+Default agent requests contain text/state and available local audio estimates, with no
+camera relay access or attached images. `look()` reads arm state by default. Explicit
+`--camera` can add diagnostic snapshots when a separately started relay is available;
+that opt-in requires consent and freshness checks, and is not the normal product path.
+
+Microphone behavior is separate: the older CLI still enables local mic capture unless
+`--no-mic` is supplied. Prompts/specs now describe those input modes accurately; disabled
+microphone output is unknown, never “judge the sound from the camera.” Adding a pretrained
+raw-audio evaluator remains a separate integration task, not a fine-tune. Bad/missing
+capture must produce uncertainty, not an assumed missed pluck.
 
 Keep mechanical telemetry, local audio estimates, model assessments, and operator judgments
 separate. Fake-arm behavior and rendered audio are not physical latency/note-quality labels.
@@ -117,4 +130,6 @@ Detailed requirements are in [sensing](sense/README.md) and [rehearsal](REHEARSA
 6. Only reconsider weight training after a measured failure/benefit hypothesis and an
    explicitly approved separate experiment.
 
-No source-code or hardware behavior changes are implied by a documentation update.
+The camera-off default and input-aware prompts/specs are implemented and regression-tested.
+The target phrase/evaluator loop and physical qualification still require their own work;
+this input-policy change does not modify the motors, grippers, or hardware safety limits.

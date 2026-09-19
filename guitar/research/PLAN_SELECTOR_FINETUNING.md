@@ -4,6 +4,8 @@
 > experiment only. The active [design](../DESIGN.md) and [rehearsal loop](../REHEARSAL_LOOP.md)
 > use fixed pretrained models and do not require a training job. Do not run the commands
 > below as setup, a hackathon prerequisite, or autonomous hardware permission.
+> **Guitar camera input is off by default.** This symbolic-plan research also has no
+> camera-input requirement; optional `--camera` diagnostics do not change that scope.
 
 No dataset/job or fine-tuned checkpoint is established by this document. The separate
 Baseten client/config scaffold is covered by [current status](../STATUS.md), not by this

@@ -4,6 +4,8 @@
 > [design](../DESIGN.md) uses defined guitar tools and bounded pretrained-model rehearsal.
 > This preserved input/transcription tool is not the new audio evaluator or arm controller.
 > Commands below describe this standalone component, not required guitar setup.
+> The active guitar camera input is **off by default**; video-file inputs below are a
+> separate legacy feature, not a live camera requirement for guitar rehearsal.
 
 Listen to a tune. Get back a timed, single-note melody transcription, arranged on the D
 string by default. The arranger chooses a fretting path under musical heuristics; that

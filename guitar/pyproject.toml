@@ -11,7 +11,11 @@ dependencies = ["lerobot[feetech]"]
 
 [project.optional-dependencies]
 agent = ["anthropic>=1.7", "openai", "sounddevice", "numpy", "opencv-python-headless"]
-baseten = ["truss>=0.9"]
+baseten = ["jsonschema>=4.23,<5"]
+baseten-audio = ["jsonschema>=4.23,<5", "numpy>=1.26,<3", "scipy>=1.13,<2"]
+web = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "jsonschema>=4.23,<5", "numpy>=1.26,<3"]
+# Only needed for the inactive custom Qwen Truss recipe, not managed Model APIs.
+baseten-deploy = ["truss>=0.18.30"]
 dev = ["pytest"]
 
 [tool.setuptools]
