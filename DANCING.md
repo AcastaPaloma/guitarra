@@ -14,32 +14,67 @@ The existing paired dashboard hosts it; no extra service or serial owner.
 3. Pick a song, then **Prepare dance**. This validates and previews the plan
    without moving the lamp or changing motor power. **Remix** changes its order
    and choice of takes. Previews expire after three minutes.
-4. **Test laptop audio** plays three tones without preparation or motor commands.
-   Check the laptop's output/mute and the tab's volume first. **Hear audio only**
-   previews the prepared excerpt without motor commands. A built-in
-   metronome works immediately. For the actual song, **Attach audio**, choose
-   an excerpt start, and **Analyze beats**, then prepare again. Files stay in
-   this browser's memory, are never uploaded, and need reattaching after reload.
-5. Clear the movement path and press **Start 30s dance**. It safely enters the
-   saved neutral, counts in, and schedules laptop audio and the lamp together.
-   Keep the tab visible and supervise playback. Entry/count-in are additional
-   to the 30-second choreography, not taken out of the excerpt.
+4. **YouTube video** is now the default soundtrack, with a video loaded for each
+   preset. No audio file is needed. **Hear audio only** previews without motor
+   commands; **Test laptop audio** plays three test tones. Check laptop mute and
+   volume. You can paste another YouTube link with **Load video**.
+5. Clear the movement path and press **Start 30s dance**. The video starts first.
+   After confirmed playback, the lamp enters saved neutral and joins a future
+   bar on the video's actual playback clock for a 30-second dance. Video pre-roll
+   includes entry/count-in; the choreography itself is still 30 seconds.
+   Keep the tab visible and supervise playback.
    An emergency-stop latch blocks Start; it is never cleared automatically.
    Inspect/support the lamp before explicitly clearing it in Controls.
 6. **Stop** cancels remaining commands and sound while retaining motor holding.
    It does not release power or command a return home. Leaving/hiding the tab
-   stops its dance; a missing heartbeat cancels commands within four seconds.
+   stops its dance. Missing heartbeats cancel commands after about two seconds
+   for YouTube (four for local audio). Pausing, buffering, seeking or changing
+   YouTube speed also stops the routine, without an automatic recovery move.
 
-No original song recordings or lyrics are bundled. The ready-to-use beat tracks
-are metronomes, not substitutes for the songs. Use audio you have permission to
-play. The audio analyzer estimates onset timing near the chosen tempo; it does
-not guarantee the correct downbeat, meter, or tempo of every recording. Preview
-and adjust the excerpt/tempo, especially for intros, live versions, or jazz.
+For offline playback, choose **Local file / beat track**. Attach a song, set
+its excerpt start, and analyze its beats before preparing. Local files stay in
+browser memory, are never uploaded, and must be reattached after reload. Without
+a file, this optional mode plays a metronome. No recordings or lyrics are bundled.
+
+### How YouTube synchronization works
+
+This uses the visible [official YouTube IFrame player](https://developers.google.com/youtube/iframe_api_reference),
+with its normal controls, ads and playback restrictions. It does not download
+videos or extract audio. Sound comes from the laptop, not the lamp's Dummy Output.
+
+Start waits for an advancing video clock before requesting any motor movement.
+Once neutral is verified, the client chooses the next bar with at least 1.5 seconds
+of lead and sends a bounded, single-use start time to the backend. During playback
+it checks the player state and timeline; more than 600 ms of disagreement stops
+both. It never speeds up the motors to chase a stalled/seeked video. The existing
+motor limits, neutral checks and saved action amplitudes are unchanged.
+
+Video timing is not automatic beat detection: the grid uses the displayed tempo
+and **Video / first beat start**. Adjust these if an intro, a different recording,
+or tempo variation makes the groove feel off. This is best-effort browser/network
+synchronization, not sample-accurate acoustic sync. The player needs internet;
+blocked autoplay, sign-in requirements, ads, region restrictions or disabled
+embedding can require interaction inside the video or a different video link.
+Such failures do not start a blind dance or silently fall back to a metronome.
+
+The five default links were checked against YouTube's oEmbed metadata on 2026-09-19:
+
+| Preset | YouTube soundtrack |
+|---|---|
+| Waterloo | [ABBA / AbbaVEVO music video](https://www.youtube.com/watch?v=Sj_9CiNkkn4) |
+| Superstition | [Stevie Wonder official album audio](https://www.youtube.com/watch?v=egqv1mtos6A) |
+| Around the World | [Daft Punk music video](https://www.youtube.com/watch?v=K0HSD_i2DvA) |
+| Seven Nation Army | [The White Stripes music video](https://www.youtube.com/watch?v=0J2QdDbelmY) |
+| Take Five | [Dave Brubeck Quartet official album audio](https://www.youtube.com/watch?v=ryA6eHZNnXY) |
+
+The iframe supplies only the origin as its cross-origin referrer, as required
+for [YouTube client identification](https://developers.google.com/youtube/iframe_api_reference#Requirements).
+The dashboard's general security headers and authentication stay unchanged.
 
 ### Dance failed, audio was silent, or the UI stayed in Dancing
 
 Refresh the page, support the lamp's head/arms, then use **Load dance update**.
-The reliability fix requires backend protocol version **2**; version 1 is
+The YouTube update requires backend protocol version **3**; earlier versions are
 detected and blocked until the operator confirms a restart. The new frontend is
 served already, but changing Python files does not update the running process.
 Do not restart an unsupported lamp or clear an emergency stop without inspection.
@@ -58,13 +93,13 @@ safety. A second bug where Stop tried to update a nonexistent Teach playback
 record is also fixed. The UI shows the underlying failure and permits a fresh
 preview after cleanup, rather than staying in Dancing.
 
-The browser must unlock audio, schedule the excerpt, and acknowledge the
+For local audio, the browser must unlock audio, schedule the excerpt, and acknowledge the
 matching countdown before the dance body can begin. Suspended/blocked audio or
 a missed deadline fails visibly and cancels playback. The audio-ready check
 confirms browser scheduling, **not** that the laptop speakers are audible:
 use **Test laptop audio** to check the physical output. The UI names the output,
 provides a volume control, and clearly distinguishes an attached song from the
-default metronome. Real song files are still not bundled.
+optional metronome. YouTube instead uses the playback-clock handshake described above.
 
 Verified with the real web/behavior/event-bus stack and fake motors, including
 an actual 35-second test with a 30-second body under the original 30-second bus
@@ -170,7 +205,7 @@ Supervise the first physical rehearsal with an unobstructed movement envelope.
 ## Source, deployment, and reproducible checks
 
 The live runtime source is `/home/lelamp/lelamp-hackathon-2026`, on its local
-`guitarra-fix-dance-lifecycle-audio` branch. Its source changes are preserved here in
+`guitarra-youtube-dance-sync` branch. Its source changes are preserved here in
 [runtime-patches/teaching-ui.patch](runtime-patches/teaching-ui.patch), now
 including both Teach and Dance. This targets original runtime commit `2fb7457`;
 do not reapply it to the already-patched lamp. For another compatible checkout,
@@ -203,8 +238,9 @@ Runtime backend checks:
 .venv/bin/python -m pytest tests/unit/test_dancing.py tests/unit/test_dance_lifecycle.py tests/unit/test_teaching.py \
   tests/unit/test_idle_route.py tests/unit/test_sdk_gateway.py tests/unit/test_robot_registry.py -q
 DANCE_REALTIME_TEST=1 .venv/bin/python -m pytest \
-  tests/unit/test_dance_lifecycle.py::test_full_30_second_dance_survives_default_bus_timeout -q
+  tests/unit/test_dance_lifecycle.py::test_full_30_second_youtube_dance_survives_default_bus_timeout -q
 node tests/dancing_dom_smoke.cjs /path/to/node_modules/jsdom
+node tests/dancing_youtube_dom_smoke.cjs /path/to/node_modules/jsdom
 node tests/teaching_dom_smoke.cjs /path/to/node_modules/jsdom
 ```
 
@@ -214,10 +250,20 @@ stripping: `node --experimental-strip-types --test tests/*.test.mjs` from the
 frontend directory. `npm run build` type-checks and builds production assets.
 The guitarra regression suite is `python3 -m unittest discover -s tests`.
 
-Latest verification on 2026-09-19: **266 runtime unit tests passed** (`tests/unit`),
-with the opt-in real-time test separately passing. All **31 frontend tests**,
-both React DOM interaction checks, the production build, and all **45 guitarra
+Latest verification on 2026-09-19: **280 runtime unit tests passed** (`tests/unit`),
+with the real-time YouTube handshake + 30-second fake-motor test separately passing
+in 33.81 seconds. All **33 frontend tests**,
+all three React DOM interaction checks, the production build, and all **45 guitarra
 tests** passed. The live GET-only legacy probe verified that the new React UI
 blocks playback against the running version-1 backend and offers its update.
 The simulated UI checks also cover audio-ready failure, completion/error exits,
-Stop, and the emergency-stop gate. No hardware rehearsal is claimed.
+Stop, and the emergency-stop gate. The YouTube-specific checks cover actual
+advancing player-clock samples, future-bar scheduling, autoplay block before
+motor admission, buffering, seeking, failed synchronization, completion and
+unmount cancellation. No hardware rehearsal is claimed.
+
+The optional `tests/dancing_youtube_browser_probe.cjs` attempts the real embed
+in muted headless Chromium without robot APIs. On this Raspberry Pi, Chromium
+remained at `about:blank` instead of loading the local probe page; real video
+playback could therefore **not** be verified here. The metadata checks and
+simulated player tests are not a claim of successful live audiovisual playback.
