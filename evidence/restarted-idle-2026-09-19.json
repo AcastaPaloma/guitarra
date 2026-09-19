@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "started_utc": "2026-09-19T07:20:16.602776+00:00",
+  "runtime_service_started_utc": "2026-09-19T07:16:42+00:00",
+  "duration_seconds": 82,
+  "samples": 486,
+  "read_errors": 0,
+  "video_frames": 2460,
+  "units": "normalized_m100_100",
+  "observed_behavior": "existing stock idle after external runtime restart",
+  "motion_commands_submitted_by_agent": 0,
+  "ranges": {
+    "base_pitch": {
+      "minimum": -92.43300052548608,
+      "maximum": -53.02154492905938,
+      "span": 39.4114555964267
+    },
+    "base_yaw": {
+      "minimum": -3.6912751677852356,
+      "maximum": 0.0,
+      "span": 3.6912751677852356
+    },
+    "elbow_pitch": {
+      "minimum": -96.63341645885286,
+      "maximum": -68.32917705735662,
+      "span": 28.304239401496247
+    },
+    "wrist_pitch": {
+      "minimum": -77.57757757757759,
+      "maximum": 50.35035035035037,
+      "span": 127.92792792792795
+    },
+    "wrist_roll": {
+      "minimum": -27.832898172323766,
+      "maximum": 23.342036553524807,
+      "span": 51.17493472584857
+    }
+  },
+  "interpretation": "All five feedback axes moved, including the elbow. This does not prove precise tracking, universal mechanical health, or safety of a new dance. Prior custom-entry failure is not erased.",
+  "camera_review": "whole-lamp snapshots and contact sheet reviewed; no calibrated 3D clearance or continuous-frame certification",
+  "candidate_runtime_deployed": false,
+  "teaching_started": false,
+  "torque_commands_submitted_by_agent": 0
+}

@@ -44,6 +44,36 @@ class Primitive:
                 for joint, track in self.tracks.items()}
 
 
+def continuous_dance(profile: dict, envelope_id: str):
+    """One five-axis carrier, with no rest or phase reset at internal phrases.
+
+    Only the beginning and ending fade to rest. Profile values are authored
+    offsets; the composer still enforces the device's unchanged envelope and
+    continuous velocity, acceleration, and jerk bounds.
+    """
+    if type(profile.get("schema_version")) is not int or profile["schema_version"] != 1:
+        raise ValueError("Unsupported continuous dance schema")
+    axes = profile.get("axes", {})
+    if set(axes) != set(JOINTS):
+        raise ValueError("Continuous dance must own all five joints")
+    beats, period, fade = (profile.get(k) for k in ("beats", "period_beats", "fade_beats"))
+    for value in (beats, period, fade):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError("Invalid continuous dance timing")
+    if not 4 <= period <= 16 or fade > beats / 2:
+        raise ValueError("Invalid continuous dance period or fade")
+    tracks = {}
+    for joint, settings in axes.items():
+        amplitude, phase = settings.get("amplitude"), settings.get("phase_beats")
+        for value in (amplitude, phase):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError("Invalid continuous dance axis")
+        if amplitude <= 0 or not 0 <= phase < period:
+            raise ValueError("Continuous dance needs positive amplitudes and bounded phases")
+        tracks[joint] = Wave(amplitude, period, phase, fade_beats=fade)
+    return [Primitive("continuous_five_axis_dance", beats, tracks, envelope_id)]
+
+
 def scene(profile: dict, envelope_id: str, partner_sign: int, bow_sign: int):
     """64 beats: 40 seconds at 96 BPM. Style parameters remain provisional."""
     required = ("yaw_amplitude", "roll_amplitude", "head_amplitude", "waist_amplitude",

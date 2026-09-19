@@ -16,7 +16,7 @@ import struct
 import wave
 
 from band.performance.composer import StageEnvelope, compose
-from band.performance.primitives import scene
+from band.performance.primitives import continuous_dance, scene
 
 PROFILES = Path(__file__).parents[1] / "performance" / "profiles"
 SIMULATION_STAGE = Path(__file__).parent / "stages" / "simulation.json"
@@ -41,16 +41,20 @@ def beat_track(path, beats, bpm):
 
 
 def build(output: Path, preset: str, stage_path: Path, bpm=96.0, support_scale=None, head_phase_beats=None):
-    if preset not in ("restrained", "accented"):
+    if preset not in ("restrained", "accented", "continuous"):
         raise ValueError("Unknown rehearsal preset")
     # JSON is the YAML 1.2 subset used for these profiles; no unsafe loader.
     profile = json.loads((PROFILES / f"{preset}.yaml").read_text())
+    if preset == "continuous" and (support_scale is not None or head_phase_beats is not None):
+        raise ValueError("Continuous dance uses its explicit five-axis profile")
     if support_scale is not None:
         profile["support_scale"] = support_scale
     if head_phase_beats is not None:
         profile["head_phase_beats"] = head_phase_beats
     stage = StageEnvelope(**json.loads(stage_path.read_text()))
-    compiled = compose(scene(profile, stage.envelope_id, stage.partner_sign, stage.bow_sign), stage, bpm)
+    primitives = (continuous_dance(profile, stage.envelope_id) if preset == "continuous"
+                  else scene(profile, stage.envelope_id, stage.partner_sign, stage.bow_sign))
+    compiled = compose(primitives, stage, bpm)
     output.mkdir(parents=True, exist_ok=False)
     csv_data = compiled.csv_bytes()
     (output / "scene.csv").write_bytes(csv_data)
@@ -69,13 +73,20 @@ def build(output: Path, preset: str, stage_path: Path, bpm=96.0, support_scale=N
     # Cues follow the tempo, rather than assuming the default 96 BPM.
     for cue, beat in zip(manifest["guitar_cues"], (32, 36, 52)):
         cue["seconds"] = beat * 60 / bpm
+    if preset == "continuous":
+        manifest["guitar_cues"] = []
+        manifest["phrase_markers"] = [
+            {"beat": beat, "seconds": beat * 60 / bpm, "motion_reset": False}
+            for beat in range(8, 64, 8)
+        ]
+        manifest["required_entry_mode"] = "held"
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preset", choices=("restrained", "accented"), required=True)
+    parser.add_argument("--preset", choices=("restrained", "accented", "continuous"), required=True)
     parser.add_argument("--stage", type=Path, default=SIMULATION_STAGE)
     parser.add_argument("--bpm", type=float, default=96)
     parser.add_argument("--support-scale", type=float,

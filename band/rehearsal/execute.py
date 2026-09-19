@@ -16,7 +16,8 @@ import uuid
 
 from band.adapters.lamp.client import LampClient
 from band.performance.composer import StageEnvelope, compose
-from band.performance.primitives import scene
+from band.performance.primitives import continuous_dance, scene
+from band.rehearsal.commission import require_held_runtime, require_stage_alignment
 from band.rehearsal.observe import capture_is_fresh
 
 
@@ -30,8 +31,12 @@ def load_scene(directory):
         raise ValueError("Simulation poses cannot be executed on hardware; commission a device-specific stage first")
     if not stage.hardware_verified:
         raise ValueError("A full rehearsal requires a stage envelope verified by prior small physical trials")
-    compiled = compose(scene(manifest["preset"], stage.envelope_id, stage.partner_sign, stage.bow_sign),
-                       stage, manifest["bpm"])
+    continuous = manifest["preset"].get("name") == "continuous_five_axis"
+    if continuous and manifest.get("required_entry_mode") != "held":
+        raise ValueError("Continuous dance requires the checked held-entry mode")
+    primitives = (continuous_dance(manifest["preset"], stage.envelope_id) if continuous
+                  else scene(manifest["preset"], stage.envelope_id, stage.partner_sign, stage.bow_sign))
+    compiled = compose(primitives, stage, manifest["bpm"])
     stored = (directory / "scene.csv").read_bytes()
     if compiled.csv_bytes() != stored or hashlib.sha256(stored).hexdigest() != manifest["trajectory_sha256"]:
         raise ValueError("Scene content or compiler version changed; rebuild and review before executing")
@@ -61,11 +66,14 @@ def execute(directory, output, base_url, token, camera_reference):
                                       "type": kind, "data": data}, allow_nan=False) + "\n")
 
             client.connect()
+            event("runtime_before", require_held_runtime(base_url))
             before = client.observe()
             event("before", asdict(before))
+            require_stage_alignment(stage, before.data)
             clip = client.upload_scene(compiled, stage)
             event("clip_validated", clip)
-            action = client.play_clip(clip, client.observe(), idempotency_key=run_id)
+            action = client.play_clip(clip, client.observe(), idempotency_key=run_id,
+                                      entry_mode=manifest.get("required_entry_mode", "measured"))
             identifier = action["action_id"]
             result["action_id"] = action["action_id"]
             event("submitted", action)

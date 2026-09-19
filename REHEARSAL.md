@@ -1,6 +1,9 @@
 # Rehearsal commands and remaining commissioning
 
 Current hardware state and results are in [SDK_COMMISSIONING.md](SDK_COMMISSIONING.md).
+The new continuous candidate and research are in [DANCE_CONTINUITY.md](DANCE_CONTINUITY.md).
+Hand-guided teaching is described in [TEACHING.md](TEACHING.md). Both retain
+physical verification gates; the runtime candidate has not been deployed.
 SDK authentication is configured. The physical stage remains unverified for a
 full performance because elbow tracking is limited. The full-scene instructions
 below remain gated; the new supervised probe command is provided at the end.

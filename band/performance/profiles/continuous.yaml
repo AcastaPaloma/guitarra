@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "continuous_five_axis",
+  "beats": 64,
+  "period_beats": 8,
+  "fade_beats": 8,
+  "axes": {
+    "base_yaw": {"amplitude": 4, "phase_beats": 0},
+    "base_pitch": {"amplitude": 2, "phase_beats": 2},
+    "elbow_pitch": {"amplitude": 2, "phase_beats": 6},
+    "wrist_roll": {"amplitude": 3, "phase_beats": 1},
+    "wrist_pitch": {"amplitude": 2, "phase_beats": 3}
+  }
+}

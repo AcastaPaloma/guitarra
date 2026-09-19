@@ -1,5 +1,11 @@
 # SDK commissioning and physical demonstration — 2026-09-19 UTC
 
+Latest continuation: an external runtime restart restored stock idle. A new
+82-second recording demonstrated movement on all five axes, including the elbow.
+No new dance, recording session, or torque change was commanded by the agent.
+The continuous/held-entry candidates below remain undeployed. See
+[DANCE_CONTINUITY.md](DANCE_CONTINUITY.md) and [TEACHING.md](TEACHING.md).
+
 The authenticated SDK now runs checked clips on the lamp. A camera-supervised
 57.5-second diagnostic demonstrated individual axes followed by a gentle wiggle.
 It completed through the SDK. **This does not confirm full five-joint health:**
@@ -216,3 +222,38 @@ and an on-site request to observe clicking/grinding or physical contact are the
 current diagnostic steps. There was **no additional dance or motion attempt**
 after the stopped test. Saved details:
 [evidence/retry-diagnosis-2026-09-19.json](evidence/retry-diagnosis-2026-09-19.json).
+
+## Restarted idle and continuous/teaching candidates
+
+The runtime service started at **07:16:42 UTC** without an agent restart. Fresh
+SDK reads reported active stock idle and moving elbow feedback. The external
+camera initially pointed away from the lamp; its full view and an unobstructed
+movement path were restored before observation. No new motor action was sent.
+
+`restarted-idle-01` began at **07:20:16.602776 UTC**: 82 seconds, 2,460 video
+frames, 486 position observations and zero read failures. Measured spans were
+yaw 3.691, waist 39.411, elbow 28.304, roll 51.175, head pitch 127.928 normalized
+units. Thus all five joints demonstrated movement. This is neither endpoint
+tracking verification nor evidence that a new larger dance is safe. Sampled
+camera views were reviewed; no calibrated 3D clearance claim is made. Details:
+[evidence/restarted-idle-2026-09-19.json](evidence/restarted-idle-2026-09-19.json).
+
+Runtime candidates are committed on `guitarra-sdk-held-entry-20260919`, in a
+separate checkout, not the running service:
+
+- `61f17be`: explicit held clip entry, using retained goal readback through the
+  existing bus owner; measured-state collision and velocity checks retained.
+- `1f4f0ce`: recording admission checks successful torque release, plus a
+  discoverable save-only option that does not request torque restoration.
+
+There are 60 passing focused runtime/SDK/recording tests, including 20 held-entry
+tests and seven recorder handoff tests. The harness has 45 passing tests. The
+continuous candidate compiles all five joints into one 40-second, 1,201-frame
+clip with no internal whole-body stops. Its fixed stage, tolerances, amplitudes
+and physical verification gates have not been relaxed to pass the prior fault.
+
+No candidate has been physically executed. The hand-guided recorder has not been
+started, and no torque release has occurred in this continuation. Deploying the
+runtime requires a supported restart because motor connect/disconnect can release
+torque. Teaching also needs a supervised manual-to-powered handoff; a saved take
+does not authorize automatic motor activation or idle restoration.
