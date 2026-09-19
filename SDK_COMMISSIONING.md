@@ -188,3 +188,31 @@ check would still not certify safe or accurate motion. The suite now has 38
 passing checks. Further motion needs diagnosis of the elbow/entry behavior and
 physical clearance, not a looser guard. Evidence is saved in
 [evidence/four-axis-dance-result-2026-09-19.json](evidence/four-axis-dance-result-2026-09-19.json).
+
+
+## Retry diagnosis — hardware damage not established
+
+The user's next retry request was checked through authenticated SDK position
+reads and the unchanged commissioning preflight. Four held samples were identical:
+elbow −79.301746, approximately −10.972569 from the original planned baseline.
+The existing elbow tolerance remains 10; the retry was rejected before any
+motion submission. The other four positions also remained stable during those
+samples. Position response and holding do not prove a mechanically healthy servo.
+
+An offline reconstruction with the installed runtime's `with_entry` confirms a
+specific command transition in the failed trial: the previous successful clip's
+planned elbow target was −68.329177, but the first new entry target is the measured
+−77.431421. That is a −9.102244 change in the generated target before easing back
+toward the authored first pose over two seconds. `MotionExecutor.execute` writes
+the first waypoint directly. This establishes the generated command behavior;
+the servo's actual goal register and torque were not measured. A resulting change
+in holding effort under gravity is a plausible contributor, not proof that it is
+the only cause or that hardware is undamaged.
+
+The installed SDK does not expose servo load, temperature, voltage or fault
+registers. No raw serial connection, gain change, torque cycle, startup bypass,
+baseline reset, or wider tolerance was used to force a retry. Source/status review
+and an on-site request to observe clicking/grinding or physical contact are the
+current diagnostic steps. There was **no additional dance or motion attempt**
+after the stopped test. Saved details:
+[evidence/retry-diagnosis-2026-09-19.json](evidence/retry-diagnosis-2026-09-19.json).

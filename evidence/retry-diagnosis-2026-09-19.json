@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "started_utc": "2026-09-19T07:08:17.481314+00:00",
+  "retry_preflight": {
+    "started_wall_ns": 1789801697481314000,
+    "motion_submitted": false,
+    "runtime": {
+      "request_mono_ns": 451228399167541,
+      "request_wall_ns": 1789801697481316000,
+      "received_mono_ns": 451228575735958,
+      "path": "/api/animations/status",
+      "response": {
+        "current_animation": null,
+        "current_idle": null,
+        "elapsed_seconds": null,
+        "idle_paused": true,
+        "idle_playing": false,
+        "last_error": null,
+        "playing": false,
+        "started_at": null
+      }
+    },
+    "positions": {
+      "base_pitch": -53.12664214398318,
+      "base_yaw": -4.250559284116335,
+      "elbow_pitch": -79.30174563591022,
+      "wrist_pitch": -14.914914914914917,
+      "wrist_roll": 2.6631853785900717
+    },
+    "elbow_error": -10.972568578553606,
+    "existing_elbow_tolerance": 10.0,
+    "result": "rejected before motion",
+    "reason": "Probe starts outside existing SDK target tolerances: elbow_pitch"
+  },
+  "held_position_samples": [
+    {
+      "wall_ns": 1789801644164551000,
+      "positions": {
+        "base_pitch": -53.12664214398318,
+        "base_yaw": -4.250559284116335,
+        "elbow_pitch": -79.30174563591022,
+        "wrist_pitch": -14.914914914914917,
+        "wrist_roll": 2.6631853785900717
+      },
+      "http_rtt_seconds": 0.06504645803943276
+    },
+    {
+      "wall_ns": 1789801644498034000,
+      "positions": {
+        "base_pitch": -53.12664214398318,
+        "base_yaw": -4.250559284116335,
+        "elbow_pitch": -79.30174563591022,
+        "wrist_pitch": -14.914914914914917,
+        "wrist_roll": 2.6631853785900717
+      },
+      "http_rtt_seconds": 0.028433167026378214
+    },
+    {
+      "wall_ns": 1789801644834800000,
+      "positions": {
+        "base_pitch": -53.12664214398318,
+        "base_yaw": -4.250559284116335,
+        "elbow_pitch": -79.30174563591022,
+        "wrist_pitch": -14.914914914914917,
+        "wrist_roll": 2.6631853785900717
+      },
+      "http_rtt_seconds": 0.03171966603258625
+    },
+    {
+      "wall_ns": 1789801645213366000,
+      "positions": {
+        "base_pitch": -53.12664214398318,
+        "base_yaw": -4.250559284116335,
+        "elbow_pitch": -79.30174563591022,
+        "wrist_pitch": -14.914914914914917,
+        "wrist_roll": 2.6631853785900717
+      },
+      "http_rtt_seconds": 0.07832816598238423
+    }
+  ],
+  "mechanical_damage_confirmed": false,
+  "mechanical_health_confirmed": false,
+  "motion_submitted": false,
+  "offline_entry_reconstruction": {
+    "runtime_commit": "2fb7457",
+    "source_function": "modules/robot_base/control/safe_motion.py::with_entry",
+    "previous_successful_clip_planned_elbow_target": -68.32917705735662,
+    "measured_before_failed_entry": -77.43142144638404,
+    "first_generated_elbow_target": -77.43142144638404,
+    "target_change_relative_to_prior_successful_clip": -9.102244389027419,
+    "entry_end_target": -68.32917705735662,
+    "entry_seconds": 2,
+    "actual_goal_register_read": false,
+    "interpretation": "Generated entry re-anchors its first target to measured feedback. A change in holding demand on a gravity-loaded joint is plausible, not a measured torque or proven sole cause."
+  },
+  "hardware_telemetry_limitations": [
+    "SDK exposes joint position but not motor voltage, load, temperature, or servo fault registers.",
+    "No second serial-bus owner was opened to fetch missing telemetry.",
+    "Physical inspection for binding, loose connections, clicking/grinding or contact remains pending."
+  ]
+}
