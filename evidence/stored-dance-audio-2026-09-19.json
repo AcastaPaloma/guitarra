@@ -1,0 +1,141 @@
+{
+  "checked_at": "2026-09-19T09:40:07.261Z",
+  "hardware_movement": false,
+  "clips": [
+    {
+      "song": "waterloo",
+      "seconds": 30,
+      "bpm": 146.8,
+      "beats": 74,
+      "sha256": "e53ab03e893e827c95322e706be077e82e7c84145b1567a7fc72b53447258f4e",
+      "variations": [
+        {
+          "variation": 0,
+          "phrases": 3,
+          "peak_speed": 146.09186573574456,
+          "budget": 195
+        },
+        {
+          "variation": 1,
+          "phrases": 3,
+          "peak_speed": 146.3494324947954,
+          "budget": 195
+        },
+        {
+          "variation": 2,
+          "phrases": 3,
+          "peak_speed": 143.37107147163036,
+          "budget": 195
+        }
+      ]
+    },
+    {
+      "song": "superstition",
+      "seconds": 30,
+      "bpm": 98.75,
+      "beats": 50,
+      "sha256": "dafc9bcfc27ea81c636f58b9119755819f6a042e56f6dea2177a68daa85697bb",
+      "variations": [
+        {
+          "variation": 0,
+          "phrases": 3,
+          "peak_speed": 172.54145564742225,
+          "budget": 195
+        },
+        {
+          "variation": 1,
+          "phrases": 3,
+          "peak_speed": 170.87164954516888,
+          "budget": 195
+        },
+        {
+          "variation": 2,
+          "phrases": 3,
+          "peak_speed": 171.2268182201675,
+          "budget": 195
+        }
+      ]
+    },
+    {
+      "song": "around_the_world",
+      "seconds": 30,
+      "bpm": 120.35,
+      "beats": 61,
+      "sha256": "862a20ef96384e5837fcb8dbe724eae136e5dc63bfcb8fb71c7e7d0fab4bfa7c",
+      "variations": [
+        {
+          "variation": 0,
+          "phrases": 3,
+          "peak_speed": 166.6111199296608,
+          "budget": 195
+        },
+        {
+          "variation": 1,
+          "phrases": 3,
+          "peak_speed": 166.27487145351333,
+          "budget": 195
+        },
+        {
+          "variation": 2,
+          "phrases": 3,
+          "peak_speed": 165.73784458298357,
+          "budget": 195
+        }
+      ]
+    },
+    {
+      "song": "seven_nation_army",
+      "seconds": 30,
+      "bpm": 125.15,
+      "beats": 63,
+      "sha256": "a7ce4012f12756d6ce3675b86fecbcce89bc7cbbe63c366e202def8f48637fe4",
+      "variations": [
+        {
+          "variation": 0,
+          "phrases": 2,
+          "peak_speed": 172.5789669149936,
+          "budget": 195
+        },
+        {
+          "variation": 1,
+          "phrases": 2,
+          "peak_speed": 164.70503383775787,
+          "budget": 195
+        },
+        {
+          "variation": 2,
+          "phrases": 3,
+          "peak_speed": 140.93509670751712,
+          "budget": 195
+        }
+      ]
+    },
+    {
+      "song": "take_five",
+      "seconds": 30,
+      "bpm": 171.9,
+      "beats": 86,
+      "sha256": "5c46b95fa8d48285df7e59d4f6443b9865b567f655d328efc94de5a8cf6d05b4",
+      "variations": [
+        {
+          "variation": 0,
+          "phrases": 3,
+          "peak_speed": 179.83813970550997,
+          "budget": 195
+        },
+        {
+          "variation": 1,
+          "phrases": 3,
+          "peak_speed": 181.41177759108896,
+          "budget": 195
+        },
+        {
+          "variation": 2,
+          "phrases": 3,
+          "peak_speed": 183.8788735781768,
+          "budget": 195
+        }
+      ]
+    }
+  ]
+}
