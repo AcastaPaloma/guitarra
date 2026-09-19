@@ -26,7 +26,10 @@ def make(name: str, **kw):
     if name == "baseten":
         from .baseten import BasetenBackend
         return BasetenBackend(**kw)
+    if name == "baseten-custom":
+        from .baseten_custom import BasetenBackend
+        return BasetenBackend(**kw)
     if name == "scripted":
         from .scripted import ScriptedBackend
         return ScriptedBackend(**kw)
-    raise ValueError(f"unknown backend '{name}' (claude | astra | baseten | scripted)")
+    raise ValueError(f"unknown backend '{name}' (baseten | baseten-custom | claude | astra | scripted)")

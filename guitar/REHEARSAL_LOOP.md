@@ -6,6 +6,11 @@ Same physical guitar arms. Default press/release/pluck capabilities stay locally
 A planner revises a performance over a few attempts using optional pretrained audio-model
 assessment and telemetry. **No model-weight training is required.**
 
+**Camera input is off by default and is not a rehearsal input requirement.** The planner
+uses the goal/score, known capabilities, arm state, and previous audio assessments. `look()`
+is state-only. `--camera` is an explicit optional diagnostic; `--no-camera` keeps the default.
+No vision-capable planner or background camera relay is required for the normal loop.
+
 ## 1. What changes between attempts
 
 ```text
@@ -46,10 +51,11 @@ persistent model memory or fine-tuning.
 | Local planner/compiler | Check the plan, choose qualified transitions, calculate timing, enforce resources | Silently move note onsets or reduce required clearance to make a bad plan fit |
 | Local controller/operator | Execute, monitor readiness/health, handle stop/thermal faults | Wait for a cloud model to decide whether to respect a protection condition |
 
-The evaluator may be the same model as the planner if its tested endpoint supports the
-required inputs, or a separate audio-capable model. A text/image model does not automatically
-accept microphone audio. A speech-to-text model is not automatically a guitar evaluator.
-Test the exact input combination before depending on it.
+A text/state planner plus a separate audio-capable evaluator is sufficient; camera input
+is not needed. The roles may share a model if its endpoint passes the required text/audio
+workload. A vision-capable model does not automatically accept microphone audio, and ASR
+is not automatically guitar evaluation. Test the selected inputs without adding a camera
+as an unstated prerequisite.
 
 For Baseten-centered product inference, use verified Baseten endpoints for the roles we
 claim Baseten performs. Astra, if used via a different provider, must be labeled accurately;
@@ -119,17 +125,20 @@ replay after a fault. A fault or emergency stop is handled locally and immediate
   wrong setting, and the grip reassertion path needs protection review. No unattended loops.
 - The bundled fret map does not provide a qualified plucking map or a complete two-arm
   scheduler. A fretting tool waiting for a human pluck is not autonomous two-arm playing.
-- The existing [`agent/loop.py`](agent/loop.py) has microphone options but also older audio
-  prompts, base-mode assumptions, and automatic rest cleanup. Do not treat it as a finished
-  implementation of this bounded rehearsal design.
+- The existing [`agent/loop.py`](agent/loop.py) now defaults to camera off and renders
+  input-aware prompts/specs. Its legacy mic default, base-mode assumptions, synchronous
+  model waits, and automatic rest cleanup still need their respective review. Do not treat
+  the camera change as a finished implementation of this bounded rehearsal design.
 - Audio input/quality, chosen model's musical assessment, and its latency are not verified
   by fake-motion tests. Do not claim useful critique just because the API accepts a WAV.
-- The [Baseten client/server/config](model/README.md) now exist; the server was added during
-  the documentation review. Live compatibility/deployment remain unverified. Qwen2.5-VL is
-  image/text, not raw audio; a separate critic path still needs code. Do not describe either
-  endpoint as working solely because its source or documentation exists.
+- The active [Baseten planner](model/README.md) now uses managed Kimi K3. Its native tool/result
+  round trip passed live with synthetic state, not a robot or recording. This is not a dedicated
+  deployment or physical rehearsal result. Raw-audio critique and a separate evaluator path
+  still need implementation/validation; the older Qwen Truss recipe is inactive.
 
-This document changes no executable code, hardware settings, or microphone permissions.
+The camera-off/input-policy change is implemented and tested with mocked frames. It changes
+no motor/gripper settings, microphone defaults, or device permissions; the full evaluator/
+phrase-rehearsal workflow remains proposed.
 
 ## 7. Relationship to fine-tuning
 

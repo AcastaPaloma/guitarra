@@ -33,6 +33,12 @@
 - Same two physical guitar arms; defined qualified tools; pretrained planner; optional
   pretrained audio evaluator; bounded revision of plans/context between attempts.
   **Fine-tuning is not required or on the current implementation path.**
+- **Guitar camera input is off by default.** Use known poses/arm telemetry and available
+  audio feedback; no vision-capable planner is required. Only explicit `--camera` opts
+  into snapshots from a separately started relay; `--no-camera` remains compatible.
+  `Toolbox` must also default to no camera, and state-only `look()` must not fetch images.
+  Keep prompts, tool specs, examples, and tests truthful about enabled inputs. Do not
+  start/stop unrelated camera programs or enable camera input as a hidden fallback.
 - `guitar/FINETUNING.md` explains that distinction. Material under `guitar/research/` is
   deferred research, not authorization to build a training pipeline or launch GPU jobs.
 - Root lamp/band architecture, teaching/dancing/commissioning files, and the old vision
@@ -53,5 +59,6 @@
   a YAML file or provider class exists. Astra/Claude requests are separate provider traffic.
 - Device/media access, live model calls, deployments, and training require their applicable
   approval and budgets. Never print keys or include them in prompts/logs/screenshots.
-- Documentation cleanup does not fix runtime behavior. Update status when code changes,
-  run relevant offline checks, and do not commit/push unless requested.
+- Document runtime changes separately from plans. Camera defaults/prompts/specs now have
+  offline regression coverage; that does not qualify physical motion or fix other runtime
+  gaps. Update status when code changes, run relevant checks, and do not commit/push unless requested.

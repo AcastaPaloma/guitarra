@@ -3,6 +3,8 @@
 `motions.py` provides functions as methods on one connected session. **Importing it
 never connects or moves hardware. `connect()` defaults to a fake arm.** No model/API
 key, camera, or microphone is needed for these motions.
+The guitar agent also keeps **camera input off by default**; `--camera` is explicit optional
+diagnostic opt-in and `--no-camera` retains the default. Normal `look()` reads arm state.
 
 This is the current low-level callable interface, not the complete target rehearsal
 controller. [DESIGN.md](DESIGN.md) owns scope and [STATUS.md](STATUS.md) records gaps.
@@ -154,12 +156,20 @@ planner over a few attempts. That changes plans/context, not model weights.
 [FINETUNING.md](FINETUNING.md) explains why weight training is deferred, not a prerequisite.
 Neither proposal authorizes unattended hardware attempts or overrides `AGENTS.md`.
 
+## Baseten-driven fake workflows
+
+[orchestration/](orchestration/README.md) now exposes these existing fret methods to Kimi K3
+using an explicitly constructed `FakeArm`, with a virtual clock to avoid real sleeping.
+It adds a synthetic pick-state fixture, not a calibrated picking trajectory. Real arms keep
+their normal wall clock and all existing gripper/configuration gates. There is no hardware
+flag in this orchestration runner; see its README for live-inference/fake-execution commands.
+
 ## Software validation
 
 From the repository root:
 
 ```bash
-guitar/.venv/bin/python -m pytest guitar/tests/test_motions.py guitar/tests/test_embodied.py -q
+guitar/.venv/bin/python -m pytest guitar/tests/test_camera_opt_in.py guitar/tests/test_motions.py guitar/tests/test_embodied.py -q
 ```
 
 Tests cover fake motion sequences, lift-before-travel, contact state, invalid

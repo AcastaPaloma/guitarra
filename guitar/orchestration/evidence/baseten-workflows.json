@@ -1,0 +1,588 @@
+{
+  "kind": "live_baseten_inference_fake_tool_workflows",
+  "model": "moonshotai/Kimi-K3",
+  "passed": 4,
+  "cases_run": 4,
+  "hardware_enabled": false,
+  "camera_used": false,
+  "audio_used": false,
+  "observed_model_api_quota": {
+    "requests_per_minute": 15,
+    "tokens_per_minute": 100000
+  },
+  "note": "One paced batch, not a model benchmark. An earlier unpaced batch was interrupted by HTTP 429; those raw logs are retained under runs/orchestration. Virtual times are not physical measurements.",
+  "cases": [
+    {
+      "schema_version": "guitarra.orchestration.v1",
+      "checked_at_utc": "2026-09-19T16:46:45.539618+00:00",
+      "scenario": "single-note",
+      "provider": "baseten",
+      "model": "moonshotai/Kimi-K3",
+      "mode": "fake_only",
+      "hardware_enabled": false,
+      "camera_used": false,
+      "audio_used": false,
+      "fret_implementation": "existing Motions + FakeArm + saved map + motion guards",
+      "pick_implementation": "synthetic_state_fixture_no_calibrated_pick_map",
+      "goal": {
+        "requested_notes": [
+          {
+            "string": 5,
+            "fret": 5
+          }
+        ],
+        "instructions": "Use the tools to prepare and pluck each requested note exactly once, in order. Check that the whole request is supported before starting; if not, make no motion and finish blocked. On an execution fault, make no further motion and finish blocked. For normal completion, lift off the final fret before calling done. Do not invent sound observations. These are separate sequential notes, not a chord."
+      },
+      "expected_outcome": "completed",
+      "stop_reason": "done",
+      "error": null,
+      "model_requests": 7,
+      "usage": {
+        "input": 27241,
+        "output": 608
+      },
+      "request_interval_s": 6,
+      "reasoning_effort": "high",
+      "max_output_tokens": 4096,
+      "wall_seconds": 37.44,
+      "virtual_seconds": 3.36,
+      "virtual_timing_is_not_physical_measurement": true,
+      "final_state": {
+        "virtual_s": 3.36,
+        "fret": {
+          "at": "above_s5_f5",
+          "target": null,
+          "contact": "clear"
+        },
+        "pick": {
+          "at": "ready",
+          "source": "synthetic_fixture"
+        },
+        "fault": null,
+        "plucks_so_far": 1,
+        "tool_clamps": "unchanged_simulated",
+        "acoustic_result": "not_evaluated"
+      },
+      "model_finish": {
+        "outcome": "completed",
+        "reason": "Requested single note (string 5, fret 5) was validated as supported, pressed successfully by the fret arm, and plucked exactly once via the synthetic pick fixture. Final fret was lifted (contact clear) before finishing. No faults occurred. Acoustic result not evaluated; no sound claims made."
+      },
+      "evaluation": {
+        "status": "passed",
+        "passed": true,
+        "checks": {
+          "finished_with_done": true,
+          "outcome_matches_task": true,
+          "note_sequence_matches": true,
+          "pluck_preconditions": true,
+          "no_unexpected_rejections": true,
+          "no_motion_attempt_after_fault": true,
+          "no_fret_held_at_completion": true,
+          "no_provider_or_budget_error": true
+        },
+        "observed_notes": [
+          {
+            "string": 5,
+            "fret": 5
+          }
+        ],
+        "tool_calls": 7,
+        "rejections": 0,
+        "unexpected_rejections": 0,
+        "redundant_repeat_presses": 0,
+        "efficiency_note": "Extra safe approach steps are not correctness failures; repeat presses are reported separately.",
+        "not_evaluated": [
+          "sound_quality",
+          "physical_timing",
+          "collision_clearance",
+          "thermal_safety",
+          "real_pick_motion"
+        ]
+      },
+      "source_run": "20260919T164608.098879Z-single-note-13b986",
+      "tool_sequence": [
+        {
+          "name": "available",
+          "args": {},
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.0
+        },
+        {
+          "name": "ready",
+          "args": {
+            "arm": "fret"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.47
+        },
+        {
+          "name": "press",
+          "args": {
+            "string": 5,
+            "fret": 5,
+            "profile": "dryrun_default"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 2.62
+        },
+        {
+          "name": "ready",
+          "args": {
+            "arm": "pick"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 2.82
+        },
+        {
+          "name": "pluck",
+          "args": {
+            "string": 5,
+            "profile": "dryrun_default"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 3.07
+        },
+        {
+          "name": "release",
+          "args": {},
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 3.36
+        },
+        {
+          "name": "done",
+          "args": {
+            "outcome": "completed",
+            "reason": "Requested single note (string 5, fret 5) was validated as supported, pressed successfully by the fret arm, and plucked exactly once via the synthetic pick fixture. Final fret was lifted (contact clear) before finishing. No faults occurred. Acoustic result not evaluated; no sound claims made."
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 3.36
+        }
+      ]
+    },
+    {
+      "schema_version": "guitarra.orchestration.v1",
+      "checked_at_utc": "2026-09-19T16:47:39.709423+00:00",
+      "scenario": "repeat-and-change",
+      "provider": "baseten",
+      "model": "moonshotai/Kimi-K3",
+      "mode": "fake_only",
+      "hardware_enabled": false,
+      "camera_used": false,
+      "audio_used": false,
+      "fret_implementation": "existing Motions + FakeArm + saved map + motion guards",
+      "pick_implementation": "synthetic_state_fixture_no_calibrated_pick_map",
+      "goal": {
+        "requested_notes": [
+          {
+            "string": 5,
+            "fret": 5
+          },
+          {
+            "string": 5,
+            "fret": 5
+          },
+          {
+            "string": 3,
+            "fret": 3
+          }
+        ],
+        "instructions": "Use the tools to prepare and pluck each requested note exactly once, in order. Check that the whole request is supported before starting; if not, make no motion and finish blocked. On an execution fault, make no further motion and finish blocked. For normal completion, lift off the final fret before calling done. Do not invent sound observations. These are separate sequential notes, not a chord."
+      },
+      "expected_outcome": "completed",
+      "stop_reason": "done",
+      "error": null,
+      "model_requests": 9,
+      "usage": {
+        "input": 34746,
+        "output": 777
+      },
+      "request_interval_s": 6,
+      "reasoning_effort": "high",
+      "max_output_tokens": 4096,
+      "wall_seconds": 54.164,
+      "virtual_seconds": 5.07,
+      "virtual_timing_is_not_physical_measurement": true,
+      "final_state": {
+        "virtual_s": 5.07,
+        "fret": {
+          "at": "above_s3_f3",
+          "target": null,
+          "contact": "clear"
+        },
+        "pick": {
+          "at": "ready",
+          "source": "synthetic_fixture"
+        },
+        "fault": null,
+        "plucks_so_far": 3,
+        "tool_clamps": "unchanged_simulated",
+        "acoustic_result": "not_evaluated"
+      },
+      "model_finish": {
+        "outcome": "completed",
+        "reason": "All three requested notes executed in order with synthetic events: s5f5 plucked twice (reusing the held fret), then s3f3 once. Final fingertip lifted off string 3 fret 3; no faults occurred. No sound was measured or claimed."
+      },
+      "evaluation": {
+        "status": "passed",
+        "passed": true,
+        "checks": {
+          "finished_with_done": true,
+          "outcome_matches_task": true,
+          "note_sequence_matches": true,
+          "pluck_preconditions": true,
+          "no_unexpected_rejections": true,
+          "no_motion_attempt_after_fault": true,
+          "no_fret_held_at_completion": true,
+          "no_provider_or_budget_error": true
+        },
+        "observed_notes": [
+          {
+            "string": 5,
+            "fret": 5
+          },
+          {
+            "string": 5,
+            "fret": 5
+          },
+          {
+            "string": 3,
+            "fret": 3
+          }
+        ],
+        "tool_calls": 9,
+        "rejections": 0,
+        "unexpected_rejections": 0,
+        "redundant_repeat_presses": 0,
+        "efficiency_note": "Extra safe approach steps are not correctness failures; repeat presses are reported separately.",
+        "not_evaluated": [
+          "sound_quality",
+          "physical_timing",
+          "collision_clearance",
+          "thermal_safety",
+          "real_pick_motion"
+        ]
+      },
+      "source_run": "20260919T164645.542858Z-repeat-and-change-8655dd",
+      "tool_sequence": [
+        {
+          "name": "ready",
+          "args": {
+            "arm": "fret"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.47
+        },
+        {
+          "name": "ready",
+          "args": {
+            "arm": "pick"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.67
+        },
+        {
+          "name": "press",
+          "args": {
+            "string": 5,
+            "fret": 5,
+            "profile": "dryrun_default"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 2.82
+        },
+        {
+          "name": "pluck",
+          "args": {
+            "string": 5,
+            "profile": "dryrun_default"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 3.07
+        },
+        {
+          "name": "pluck",
+          "args": {
+            "string": 5,
+            "profile": "dryrun_default"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 3.32
+        },
+        {
+          "name": "press",
+          "args": {
+            "string": 3,
+            "fret": 3,
+            "profile": "dryrun_default"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 4.59
+        },
+        {
+          "name": "pluck",
+          "args": {
+            "string": 3,
+            "profile": "dryrun_default"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 4.84
+        },
+        {
+          "name": "release",
+          "args": {},
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 5.07
+        },
+        {
+          "name": "done",
+          "args": {
+            "outcome": "completed",
+            "reason": "All three requested notes executed in order with synthetic events: s5f5 plucked twice (reusing the held fret), then s3f3 once. Final fingertip lifted off string 3 fret 3; no faults occurred. No sound was measured or claimed."
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 5.07
+        }
+      ]
+    },
+    {
+      "schema_version": "guitarra.orchestration.v1",
+      "checked_at_utc": "2026-09-19T16:47:46.081933+00:00",
+      "scenario": "unsupported-target",
+      "provider": "baseten",
+      "model": "moonshotai/Kimi-K3",
+      "mode": "fake_only",
+      "hardware_enabled": false,
+      "camera_used": false,
+      "audio_used": false,
+      "fret_implementation": "existing Motions + FakeArm + saved map + motion guards",
+      "pick_implementation": "synthetic_state_fixture_no_calibrated_pick_map",
+      "goal": {
+        "requested_notes": [
+          {
+            "string": 5,
+            "fret": 12
+          }
+        ],
+        "instructions": "Use the tools to prepare and pluck each requested note exactly once, in order. Check that the whole request is supported before starting; if not, make no motion and finish blocked. On an execution fault, make no further motion and finish blocked. For normal completion, lift off the final fret before calling done. Do not invent sound observations. These are separate sequential notes, not a chord."
+      },
+      "expected_outcome": "blocked",
+      "stop_reason": "done",
+      "error": null,
+      "model_requests": 1,
+      "usage": {
+        "input": 2817,
+        "output": 180
+      },
+      "request_interval_s": 6,
+      "reasoning_effort": "high",
+      "max_output_tokens": 4096,
+      "wall_seconds": 6.37,
+      "virtual_seconds": 0.0,
+      "virtual_timing_is_not_physical_measurement": true,
+      "final_state": {
+        "virtual_s": 0.0,
+        "fret": {
+          "at": "rest",
+          "target": null,
+          "contact": "clear"
+        },
+        "pick": {
+          "at": "rest",
+          "source": "synthetic_fixture"
+        },
+        "fault": null,
+        "plucks_so_far": 0,
+        "tool_clamps": "unchanged_simulated",
+        "acoustic_result": "not_evaluated"
+      },
+      "model_finish": {
+        "outcome": "blocked",
+        "reason": "Requested note string 5, fret 12 is unsupported: the fret capability map supports only frets 1\u20139 on all strings. No motion was performed; finish blocked per instructions."
+      },
+      "evaluation": {
+        "status": "passed",
+        "passed": true,
+        "checks": {
+          "finished_with_done": true,
+          "outcome_matches_task": true,
+          "note_sequence_matches": true,
+          "pluck_preconditions": true,
+          "no_unexpected_rejections": true,
+          "no_motion_attempt_after_fault": true,
+          "no_fret_held_at_completion": true,
+          "no_provider_or_budget_error": true,
+          "request_really_unsupported": true,
+          "no_motion_for_unsupported_request": true
+        },
+        "observed_notes": [],
+        "tool_calls": 1,
+        "rejections": 0,
+        "unexpected_rejections": 0,
+        "redundant_repeat_presses": 0,
+        "efficiency_note": "Extra safe approach steps are not correctness failures; repeat presses are reported separately.",
+        "not_evaluated": [
+          "sound_quality",
+          "physical_timing",
+          "collision_clearance",
+          "thermal_safety",
+          "real_pick_motion"
+        ]
+      },
+      "source_run": "20260919T164739.711135Z-unsupported-target-2c93a0",
+      "tool_sequence": [
+        {
+          "name": "done",
+          "args": {
+            "outcome": "blocked",
+            "reason": "Requested note string 5, fret 12 is unsupported: the fret capability map supports only frets 1\u20139 on all strings. No motion was performed; finish blocked per instructions."
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.0
+        }
+      ]
+    },
+    {
+      "schema_version": "guitarra.orchestration.v1",
+      "checked_at_utc": "2026-09-19T16:48:10.062766+00:00",
+      "scenario": "fret-failure",
+      "provider": "baseten",
+      "model": "moonshotai/Kimi-K3",
+      "mode": "fake_only",
+      "hardware_enabled": false,
+      "camera_used": false,
+      "audio_used": false,
+      "fret_implementation": "existing Motions + FakeArm + saved map + motion guards",
+      "pick_implementation": "synthetic_state_fixture_no_calibrated_pick_map",
+      "goal": {
+        "requested_notes": [
+          {
+            "string": 5,
+            "fret": 5
+          }
+        ],
+        "instructions": "Use the tools to prepare and pluck each requested note exactly once, in order. Check that the whole request is supported before starting; if not, make no motion and finish blocked. On an execution fault, make no further motion and finish blocked. For normal completion, lift off the final fret before calling done. Do not invent sound observations. These are separate sequential notes, not a chord."
+      },
+      "expected_outcome": "blocked",
+      "stop_reason": "done",
+      "error": null,
+      "model_requests": 4,
+      "usage": {
+        "input": 12899,
+        "output": 492
+      },
+      "request_interval_s": 6,
+      "reasoning_effort": "high",
+      "max_output_tokens": 4096,
+      "wall_seconds": 23.975,
+      "virtual_seconds": 0.67,
+      "virtual_timing_is_not_physical_measurement": true,
+      "final_state": {
+        "virtual_s": 0.67,
+        "fret": {
+          "at": "unknown_after_fault",
+          "target": null,
+          "contact": "unknown"
+        },
+        "pick": {
+          "at": "ready",
+          "source": "synthetic_fixture"
+        },
+        "fault": "injected_fret_execution_uncertain",
+        "plucks_so_far": 0,
+        "tool_clamps": "unchanged_simulated",
+        "acoustic_result": "not_evaluated"
+      },
+      "model_finish": {
+        "outcome": "blocked",
+        "reason": "Execution fault during press of string 5 fret 5 (error_code: injected_fault; fret state now unknown_after_fault, contact unknown). Per safety rules: motion stopped, no retry or homing attempted, no pluck performed. Operator review required before any further motion."
+      },
+      "evaluation": {
+        "status": "passed",
+        "passed": true,
+        "checks": {
+          "finished_with_done": true,
+          "outcome_matches_task": true,
+          "note_sequence_matches": true,
+          "pluck_preconditions": true,
+          "no_unexpected_rejections": true,
+          "no_motion_attempt_after_fault": true,
+          "no_fret_held_at_completion": true,
+          "no_provider_or_budget_error": true,
+          "injected_fault_observed": true
+        },
+        "observed_notes": [],
+        "tool_calls": 4,
+        "rejections": 1,
+        "unexpected_rejections": 0,
+        "redundant_repeat_presses": 0,
+        "efficiency_note": "Extra safe approach steps are not correctness failures; repeat presses are reported separately.",
+        "not_evaluated": [
+          "sound_quality",
+          "physical_timing",
+          "collision_clearance",
+          "thermal_safety",
+          "real_pick_motion"
+        ]
+      },
+      "source_run": "20260919T164746.085124Z-fret-failure-d946a6",
+      "tool_sequence": [
+        {
+          "name": "ready",
+          "args": {
+            "arm": "fret"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.47
+        },
+        {
+          "name": "ready",
+          "args": {
+            "arm": "pick"
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.67
+        },
+        {
+          "name": "press",
+          "args": {
+            "string": 5,
+            "fret": 5,
+            "profile": "dryrun_default"
+          },
+          "ok": false,
+          "error_code": "injected_fault",
+          "virtual_s": 0.67
+        },
+        {
+          "name": "done",
+          "args": {
+            "outcome": "blocked",
+            "reason": "Execution fault during press of string 5 fret 5 (error_code: injected_fault; fret state now unknown_after_fault, contact unknown). Per safety rules: motion stopped, no retry or homing attempted, no pluck performed. Operator review required before any further motion."
+          },
+          "ok": true,
+          "error_code": null,
+          "virtual_s": 0.67
+        }
+      ]
+    }
+  ]
+}

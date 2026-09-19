@@ -1,13 +1,14 @@
-"""Embodied loop: the model sees camera + audio score, calls tools, guards run them on the arm.
+"""Guitar agent: arm state and available audio feedback; camera input is OFF by default.
 
-    python -m agent.loop --role fret --backend baseten --port /dev/cu.usbmodem5B790163191
-    python -m agent.loop --role fret --backend scripted --fake-arm          # no API, no arm
+    python -m agent.loop --role fret --backend scripted --fake-arm --no-mic
 
-Roles (current wiring, verified 2026-09-19): fret arm = IDs 7-12 on /dev/cu.usbmodem5B790163191
--> --id fret_arm --offset 6 (the defaults). The pluck arm is not connected yet.
+Use --camera only to opt into snapshots from a separately started local camera relay.
+--no-camera remains an explicit off switch. Neither option starts the relay itself.
 
-Ctrl-C at any time: the arm goes to `rest` slowly, then torque is released.
-Every run is recorded under runs/<timestamp>-<backend>/ (frames + decisions.jsonl).
+Hardware requires separate operator qualification; see SETUP.md and ../AGENTS.md.
+The existing loop attempts rest in cleanup, then releases body torque while retaining
+its tool clamp. This is not an independent emergency-stop/watchdog implementation.
+Run logs contain decisions.jsonl; JPEGs are recorded only when frames are supplied.
 """
 import argparse
 import json
@@ -26,47 +27,80 @@ from robot.arm import FakeArm, RealArm  # noqa: E402
 from robot.guards import GuardError  # noqa: E402
 
 SYSTEM_FRET = """\
-You control the fretting arm of a robot guitarist: one SO-101 arm holding a rubber fingertip, \
-beside the neck of an electric guitar lying flat and face up, standard tuning (string 6 = E2 ... \
-string 1 = E4). Someone else plucks the string after you press - your job is the left hand. \
-A camera (an iPad at string height) shows the neck and your arm. A microphone scores each note.
+You control the fretting arm of a robot guitarist: one SO-101 holding a rubber fingertip,
+beside an electric guitar in standard tuning (string 6 = E2 ... string 1 = E4).
+Someone else plucks after you press; this session controls the fretting arm only.
 
 Your goal: {goal}.
 
+Available observations:
+{observations}
+
 How you act:
-- You never set joint angles. You call tools: fret(string, fret, press_mm, speed), release(speed), \
-move_to(named pose, only when no fret is held), look(), done(reason). A safety layer checks \
-every motion before it runs and rejects anything outside the recorded workspace or too fast; \
-a rejection costs you the turn, so read it.
-- fret result: "expected" is the note that fret should sound; "score" has rang, pitch, onsets. \
-Pitch equal to the open string means you did not hold the string down; extra onsets or a \
-wrong nearby pitch suggest buzzing or pressing in the wrong spot. The camera shows where the \
-tip landed relative to the fret wire.
-- Start light and change one parameter per attempt. Before each tool call, say in one sentence \
-what you saw and why you are changing what you change - that sentence is the run's narration.
-- Call done when the goal is met, or when you are stuck and a human needs to adjust the rig \
-(for example re-record a fret pose). You have at most {turns} tool calls.
+- Never set joint angles, change calibration/grip settings, or bypass a rejection.
+  Use fret(string, fret, press_mm, speed), release(speed), move_to(named pose, only when
+  no fret is held), look(), and done(reason). Local guards check configured motion limits;
+  those checks do not establish contact force or permission to explore unqualified settings.
+- The fret result's "expected" is the intended note, not proof that it sounded. Use actual
+  provided measurements only. Missing or ambiguous feedback is unknown, not success or a
+  definite mechanical diagnosis. Multiple onsets alone do not prove buzzing or snagging.
+- Use only operator-qualified settings. When an adjustment is permitted, change one factor
+  at a time and give a concise reason based on the observations actually provided.
+- look() reads arm state without moving; its description says whether images are enabled.
+- Call done when the goal is met or operator review is needed. Do not invent missing
+  observations or claim progress without evidence. You have at most {turns} tool calls.
 """
 
 SYSTEM_PLUCK = """\
-You control one SO-101 robot arm holding a guitar pick, next to an electric guitar lying flat \
-and face up. One string is live (target note {target}); the others are muted with foam. A camera \
-(an iPad at string height) shows the neck and the arm. A microphone scores every pluck.
+You control one SO-101 arm holding a guitar pick beside an electric guitar.
+Use the recorded plucking capability for the selected string (target note {target}).
 
 Your goal: produce {goal}.
 
+Available observations:
+{observations}
+
 How you act:
-- You never set joint angles. You call tools: move_to(named pose), pluck(depth_mm, speed), \
-look(), done(reason). A safety layer checks every motion before it runs and rejects anything \
-outside the recorded workspace or too fast; a rejection costs you the turn, so read it.
-- pluck result "score": rang (did it sound), level_over_floor_db, onsets (1 = clean, more = \
-buzz or snag, 0 = silent), pitch vs target.
-- Start conservative (shallow, slow) and change one parameter per attempt. Before each tool \
-call, say in one sentence what you saw and why you are changing what you change - that \
-sentence is the narration of the run.
-- Call done when the goal is met, or when you are stuck and a human needs to adjust the rig. \
-You have at most {turns} tool calls.
+- Never set joint angles, change calibration/grip settings, or bypass a rejection.
+  Use move_to(named pose), pluck(depth_mm, speed), look(), and done(reason). Local guards
+  check configured motion limits; these are not contact-force or acoustic guarantees.
+- Use audio estimates only when provided. No clear sound can mean a capture problem,
+  not necessarily a missed pick. Onset count alone does not establish clean sound or snagging.
+  A commanded pose and target note are not proof of a successful audible performance.
+- Use only operator-qualified settings. When an adjustment is permitted, change one factor
+  at a time and give a concise reason based on the observations actually provided.
+- look() reads arm state without moving; its description says whether images are enabled.
+- Call done when the goal is met or operator review is needed. Do not invent missing
+  observations or claim progress without evidence. You have at most {turns} tool calls.
 """
+
+
+def build_system_prompt(role: str, *, goal: str, target: str, turns: int,
+                        use_camera: bool = False, use_mic: bool = False) -> str:
+    """Describe only the enabled inputs; camera-free runs must not imply visual evidence."""
+    if use_camera:
+        camera_note = (
+            "Camera input is enabled by explicit opt-in. A snapshot may be attached from the "
+            "local relay. If it is missing or stale, do not assume visual evidence is available."
+        )
+    else:
+        camera_note = (
+            "Camera input is disabled. No images or video are provided. Use the supplied "
+            "named-pose/tool state; do not claim to see the guitar or request camera frames."
+        )
+    if use_mic:
+        mic_note = (
+            "Microphone input is enabled. Tools may return local pitch/onset/level estimates, "
+            "not raw audio or a separate audio-model critique. Treat missing/noisy data as uncertain."
+        )
+    else:
+        mic_note = (
+            "Microphone input is disabled. No acoustic measurement is available. Do not infer "
+            "sound quality from a commanded pose, the expected note, or an image."
+        )
+    template = SYSTEM_FRET if role == "fret" else SYSTEM_PLUCK
+    return template.format(goal=goal, target=target, turns=turns,
+                           observations=f"- {camera_note}\n- {mic_note}")
 
 
 def load_env(path: Path) -> None:
@@ -100,24 +134,38 @@ class Recorder:
             f.write(json.dumps(rec, default=str) + "\n")
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse configuration without accessing devices, credentials, or model APIs."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", default="claude", help="claude | astra | baseten | scripted")
-    ap.add_argument("--model", help="override the backend's default model id")
-    ap.add_argument("--effort", default="medium")
+    ap.add_argument("--backend", default="baseten", help="baseten (default) | baseten-custom | claude | astra | scripted")
+    ap.add_argument("--model", help="override model (Baseten Model API slug, e.g. moonshotai/Kimi-K3)")
+    ap.add_argument("--effort", help="override backend reasoning effort; Baseten uses .env or high")
     ap.add_argument("--port")
     ap.add_argument("--role", choices=["fret", "pluck"], default="fret")
     ap.add_argument("--id", help="calibration/pose id (default: fret_arm or pluck_arm)")
     ap.add_argument("--offset", type=int, help="motor ID offset (default: 6 for fret, 0 for pluck)")
     ap.add_argument("--fake-arm", action="store_true", help="no hardware; motion is simulated")
     ap.add_argument("--no-mic", action="store_true")
-    ap.add_argument("--no-camera", action="store_true")
+    camera_flags = ap.add_mutually_exclusive_group()
+    camera_flags.add_argument(
+        "--camera", dest="use_camera", action="store_true",
+        help="opt into camera snapshots from a separately started relay (default: off)",
+    )
+    camera_flags.add_argument(
+        "--no-camera", dest="use_camera", action="store_false",
+        help="keep camera input disabled (default; retained for compatibility)",
+    )
+    ap.set_defaults(use_camera=False)
     ap.add_argument("--target", default="A2", help="open note of the live string")
     ap.add_argument("--goal", help="override the role's default goal")
     ap.add_argument("--turns", type=int, default=20, help="max tool calls")
     ap.add_argument("--minutes", type=float, default=15, help="wall-clock cap")
     ap.add_argument("--max-deg-per-s", type=float, help="joint speed cap at speed=1.0 (default robot.arm.MAX_DEG_PER_S)")
-    args = ap.parse_args()
+    return ap.parse_args(argv)
+
+
+def main() -> None:
+    args = parse_args()
     args.id = args.id or f"{args.role}_arm"
     args.offset = (6 if args.role == "fret" else 0) if args.offset is None else args.offset
     args.goal = args.goal or (
@@ -137,7 +185,8 @@ def main() -> None:
             sys.exit("--port is required unless --fake-arm")
         arm = RealArm(args.port, args.id, args.offset)
 
-    kw = {"effort": args.effort, **({"model": args.model} if args.model else {})}
+    kw = {**({"effort": args.effort} if args.effort else {}),
+          **({"model": args.model} if args.model else {})}
     backend = backends.make(args.backend, **({"role": args.role} if args.backend == "scripted" else kw))
     rec = Recorder(args.backend)
     mic = None
@@ -148,13 +197,15 @@ def main() -> None:
             from sense.mic import Mic
             mic = Mic().start()
             print(f"mic noise floor (arm holding): {mic.measure_floor():.1f} dB")
-        tools = Toolbox(arm, mic, args.target, use_camera=not args.no_camera)
+        tools = Toolbox(arm, mic, args.target, use_camera=args.use_camera)
         pose_names = sorted(arm.poses)
         frets = fretmap.available(arm.poses)
         if args.role == "fret" and not frets:
             sys.exit(f"no fret map for '{args.id}' - run scripts/record_fret_map.py")
-        system = (SYSTEM_FRET if args.role == "fret" else SYSTEM_PLUCK).format(
-            target=args.target, goal=args.goal, turns=args.turns)
+        system = build_system_prompt(
+            args.role, target=args.target, goal=args.goal, turns=args.turns,
+            use_camera=args.use_camera, use_mic=mic is not None,
+        )
 
         # Start every run from a known pose, before the model gets control: a far-off start pose
         # otherwise makes every model request fail the swing guard (run 20260919-033700).
@@ -169,13 +220,18 @@ def main() -> None:
 
         img, cam_err = tools._frame()
         opening = json.dumps({"arm": arm.state(), "poses": pose_names,
+                              "inputs": {"camera": "enabled" if args.use_camera else "disabled",
+                                         "microphone": "enabled" if mic is not None else "disabled"},
                               **({"calibrated_frets": {f"string {k}": v for k, v in frets.items()}}
                                  if args.role == "fret" else {}),
                               **({"camera": cam_err} if cam_err else {})})
-        rec.log(turn=0, event="start", backend=args.backend, args=vars(args), observation=opening, frame=rec.frame(img))
+        rec.log(turn=0, event="start", backend=args.backend, model=getattr(backend, "model", None),
+                args=vars(args), observation=opening, frame=rec.frame(img))
         print(f"run -> {rec.dir}\n")
 
-        turn = backend.begin(system, specs(pose_names, args.role, frets), f"Session start. Current observation: {opening}", img)
+        tool_specs = specs(pose_names, args.role, frets,
+                           use_camera=args.use_camera, use_mic=mic is not None)
+        turn = backend.begin(system, tool_specs, f"Session start. Current observation: {opening}", img)
         deadline = time.monotonic() + args.minutes * 60
         used = 0
         while True:

@@ -41,6 +41,7 @@ class Arm:
     """Pose-table arm. Subclasses provide _read() and _send()."""
 
     def __init__(self, arm_id: str):
+        self._clock = time  # unchanged wall clock for hardware; FakeArm may use a virtual clock
         self.arm_id = arm_id
         data = pose_store.load(arm_id)
         self.poses: dict[str, Pose] = data["poses"]
@@ -132,30 +133,30 @@ class Arm:
                 self._move_base(traj, speed)
                 self.last_cmd = traj[-1]
                 continue
-            t_seg = time.monotonic()
-            t_cmd = t_cmd or t_seg
+            t_seg = self._clock.monotonic()
+            t_cmd = t_seg if t_cmd is None else t_cmd
             next_t = t_seg
             for i, q in enumerate(traj):
                 self._send(q)
                 if i >= 3 and i % TRACK_EVERY == 0:
                     self._check_tracking(traj[i - 3])   # servos trail the command by a few steps
                 next_t += 1 / CONTROL_HZ
-                time.sleep(max(0.0, next_t - time.monotonic()))
+                self._clock.sleep(max(0.0, next_t - self._clock.monotonic()))
             self.last_cmd = traj[-1]
-        t_cmd = t_cmd or time.monotonic()
-        time.sleep(0.15)  # let the servos settle before anyone reads position
+        t_cmd = self._clock.monotonic() if t_cmd is None else t_cmd
+        self._clock.sleep(0.15)  # let the servos settle before anyone reads position
         steps = sum(len(traj) for _, traj in plans)
-        return {"t_cmd": t_cmd, "duration_s": round(time.monotonic() - t_cmd, 2), "steps": steps}
+        return {"t_cmd": t_cmd, "duration_s": round(self._clock.monotonic() - t_cmd, 2), "steps": steps}
 
     def _move_base(self, traj: list[Pose], speed: float) -> None:
         """Turn the base along a base-only segment. Default: stream it like any other joint."""
-        next_t = time.monotonic()
+        next_t = self._clock.monotonic()
         for i, q in enumerate(traj):
             self._send(q)
             if i >= 3 and i % TRACK_EVERY == 0:
                 self._check_tracking(traj[i - 3])
             next_t += 1 / CONTROL_HZ
-            time.sleep(max(0.0, next_t - time.monotonic()))
+            self._clock.sleep(max(0.0, next_t - self._clock.monotonic()))
 
     def move_to(self, pose: str, speed: float = 0.4) -> dict:
         if self.pressing is not None:
@@ -312,8 +313,10 @@ class RealArm(Arm):
 class FakeArm(Arm):
     """Same interface, no hardware: position follows commands instantly."""
 
-    def __init__(self, arm_id: str):
+    def __init__(self, arm_id: str, *, clock=None):
         super().__init__(arm_id)
+        if clock is not None:
+            self._clock = clock
         self.q = dict(self.poses.get("rest", next(iter(self.poses.values()))))
 
     def _hard_box(self) -> dict:

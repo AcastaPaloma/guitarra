@@ -1,4 +1,4 @@
-"""Baseten Truss model for the Guitarra robot agent.
+"""Baseten Truss model for the Guitarra text/state planner.
 
 Input contract (sent by agent.backends.baseten):
     {
@@ -6,13 +6,17 @@ Input contract (sent by agent.backends.baseten):
       "system": "role/task prompt",
       "tools": [{"name": "look", "description": "...", "parameters": {...}}, ...],
       "messages": [
-        {"role": "user", "text": "...", "image_jpeg_b64": "optional"},
+        {"role": "user", "text": "..."},
         {"role": "assistant", "text": "...", "tool_calls": [...]},
         {"role": "tool", "tool_call_id": "...", "name": "fret", "text": "{...}",
-         "is_error": false, "image_jpeg_b64": "optional"}
+         "is_error": false}
       ],
       "generation": {"effort": "low|medium|high"}
     }
+
+Optional diagnostic camera snapshots may appear as ``image_jpeg_b64`` in messages only
+when the local CLI is run with explicit ``--camera``. This text planner intentionally ignores
+image bytes; camera input is not part of the normal project path.
 
 Output contract:
     {"text": "narration", "tool_calls": [{"id": "...", "name": "...", "arguments": {...}}],
@@ -23,60 +27,78 @@ its guard layer; Baseten never talks to robot hardware directly.
 """
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
-from io import BytesIO
 from typing import Any
 from uuid import uuid4
 
 
-MODEL_ID = os.environ.get("HF_MODEL_ID", "Qwen/Qwen2.5-VL-7B-Instruct")
+MODEL_ID = os.environ.get("HF_MODEL_ID", "Qwen/Qwen2.5-7B-Instruct")
+
+OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "text": {"type": "string"},
+        "tool_calls": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "arguments": {"type": "object"},
+                },
+                "required": ["name", "arguments"],
+                "additionalProperties": True,
+            },
+        },
+        "stop": {"type": "string", "enum": ["tool_use", "end_turn", "refusal"]},
+    },
+    "required": ["text", "tool_calls", "stop"],
+    "additionalProperties": True,
+}
 
 
 class Model:
     def __init__(self, **_: Any):
         self.llm = None
-        self.processor = None
+        self.tokenizer = None
         self.sampling_params_cls = None
-        self.default_max_tokens = int(os.environ.get("MAX_NEW_TOKENS", "768"))
-        self.default_temperature = float(os.environ.get("TEMPERATURE", "0.2"))
+        self.default_max_tokens = int(os.environ.get("MAX_NEW_TOKENS", "512"))
+        self.default_temperature = float(os.environ.get("TEMPERATURE", "0.1"))
         self.default_top_p = float(os.environ.get("TOP_P", "0.9"))
 
     def load(self) -> None:
-        # Imports live here so local unit tests can import this file without GPU dependencies.
-        from transformers import AutoProcessor
+        # Imports live here so local unit checks can import this file without GPU dependencies.
+        from transformers import AutoTokenizer
         from vllm import LLM, SamplingParams
 
         hf_token = os.environ.get("hf_access_token") or os.environ.get("HF_TOKEN")
         if hf_token:
-            # vLLM/Transformers both know this conventional env var.
             os.environ.setdefault("HF_TOKEN", hf_token)
 
-        self.processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True, token=hf_token)
+        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True, token=hf_token)
         self.sampling_params_cls = SamplingParams
         self.llm = LLM(
             model=MODEL_ID,
             trust_remote_code=True,
             max_model_len=int(os.environ.get("MAX_MODEL_LEN", "8192")),
             gpu_memory_utilization=float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.90")),
-            limit_mm_per_prompt={"image": int(os.environ.get("MAX_IMAGES_PER_PROMPT", "1"))},
         )
 
     def predict(self, model_input: dict[str, Any]) -> dict[str, Any]:
-        if self.llm is None or self.processor is None or self.sampling_params_cls is None:
+        if self.llm is None or self.tokenizer is None or self.sampling_params_cls is None:
             raise RuntimeError("model is not loaded")
 
         prompt = build_controller_prompt(model_input)
-        image = latest_image(model_input.get("messages", []))
-        llm_input = self._llm_input(prompt, image)
+        llm_input = self._llm_input(prompt)
 
         generation = model_input.get("generation", {}) if isinstance(model_input.get("generation", {}), dict) else {}
         max_tokens = int(generation.get("max_tokens") or self.default_max_tokens)
         temperature = float(generation.get("temperature") or self.default_temperature)
         top_p = float(generation.get("top_p") or self.default_top_p)
-        sampling = self.sampling_params_cls(max_tokens=max_tokens, temperature=temperature, top_p=top_p)
+        sampling = self._sampling_params(max_tokens=max_tokens, temperature=temperature, top_p=top_p)
 
         result = self.llm.generate([llm_input], sampling)[0]
         raw = result.outputs[0].text.strip()
@@ -85,17 +107,24 @@ class Model:
         parsed["usage"] = token_usage(result)
         return parsed
 
-    def _llm_input(self, prompt: str, image: Any | None) -> Any:
-        if image is None:
-            messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-            return self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    def _llm_input(self, prompt: str) -> str:
+        messages = [
+            {"role": "system", "content": "You are a JSON-only planner. Return exactly one JSON object."},
+            {"role": "user", "content": prompt},
+        ]
+        return self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
-        messages = [{"role": "user", "content": [
-            {"type": "image", "image": image},
-            {"type": "text", "text": prompt},
-        ]}]
-        chat_prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        return {"prompt": chat_prompt, "multi_modal_data": {"image": image}}
+    def _sampling_params(self, *, max_tokens: int, temperature: float, top_p: float) -> Any:
+        kwargs: dict[str, Any] = {"max_tokens": max_tokens, "temperature": temperature, "top_p": top_p}
+        if os.environ.get("GUIDED_JSON", "1") != "0":
+            kwargs["guided_json"] = OUTPUT_SCHEMA
+        try:
+            return self.sampling_params_cls(**kwargs)
+        except TypeError:
+            # Older vLLM versions may not support guided_json. The prompt and parser still
+            # preserve the contract, but deployment validation must measure malformed output.
+            kwargs.pop("guided_json", None)
+            return self.sampling_params_cls(**kwargs)
 
 
 def build_controller_prompt(model_input: dict[str, Any]) -> str:
@@ -108,19 +137,21 @@ def build_controller_prompt(model_input: dict[str, Any]) -> str:
         messages = []
 
     return "\n".join([
-        "You are the decision model for a local robot-guitar control loop.",
+        "You are the decision model for a local robot-guitar rehearsal loop.",
         "The robot is NOT connected to you. You only choose among the provided tools; a local safety layer validates and runs them.",
-        "Never invent tools or raw joint angles. Never open, loosen, or power-cycle grippers. In this project, release means lift off a guitar string.",
-        "Call at most one tool per turn unless the user explicitly asks for a multi-step plan and the observations are certain.",
-        "Before a tool call, put one concise observation/reason in the text field.",
+        "Normal input is text/state only. Camera input is disabled unless the transcript explicitly says otherwise; do not claim visual evidence.",
+        "Never invent tools, raw joint angles, unsupported notes, calibration changes, grip changes, or safety overrides.",
+        "In this project, release means lift off a guitar string; it never means opening or loosening a gripper.",
+        "Call at most one tool per turn unless the local prompt explicitly asks for multiple and the state is certain.",
+        "Before a tool call, put one concise observation/reason in the text field, based only on supplied state/audio/tool results.",
         "",
-        "Return exactly one JSON object and no markdown fences:",
+        "Return exactly one JSON object and no markdown fences. Shape:",
         json.dumps({
-            "text": "what you saw and why this tool is next",
+            "text": "what was observed and why this tool is next",
             "tool_calls": [{"name": "look", "arguments": {}}],
             "stop": "tool_use",
         }),
-        "If the goal is complete or unsafe/stuck, call the done tool if available. If no tool is needed, use an empty tool_calls array and stop=end_turn.",
+        "If the goal is complete, unsafe, unsupported, or stuck, call done when that tool is available. If no tool is needed, use an empty tool_calls array and stop=end_turn.",
         "",
         "SYSTEM TASK:",
         system,
@@ -141,7 +172,7 @@ def transcript_text(messages: list[Any]) -> str:
         if not isinstance(msg, dict):
             continue
         role = msg.get("role", "unknown")
-        image_note = " [image attached]" if msg.get("image_jpeg_b64") else ""
+        image_note = " [optional image omitted by text-only planner]" if msg.get("image_jpeg_b64") else ""
         if role == "assistant":
             calls = msg.get("tool_calls", [])
             lines.append(f"{i}. assistant{image_note}: {msg.get('text', '')} tool_calls={json.dumps(calls, ensure_ascii=False)}")
@@ -151,23 +182,6 @@ def transcript_text(messages: list[Any]) -> str:
         else:
             lines.append(f"{i}. {role}{image_note}: {msg.get('text', '')}")
     return "\n".join(lines)
-
-
-def latest_image(messages: list[Any]) -> Any | None:
-    for msg in reversed(messages):
-        if isinstance(msg, dict) and msg.get("image_jpeg_b64"):
-            return decode_image(str(msg["image_jpeg_b64"]))
-    return None
-
-
-def decode_image(value: str) -> Any:
-    from PIL import Image
-
-    # Accept either raw base64 or a data URL.
-    if "," in value and value.lstrip().startswith("data:"):
-        value = value.split(",", 1)[1]
-    data = base64.b64decode(value)
-    return Image.open(BytesIO(data)).convert("RGB")
 
 
 def parse_model_json(raw: str) -> dict[str, Any]:
@@ -223,8 +237,6 @@ def normalize_tool_calls(raw_calls: Any) -> list[dict[str, Any]]:
 
 
 def token_usage(result: Any) -> dict[str, int]:
-    # vLLM exposes token ids on request/output objects; keep this best-effort so version
-    # differences do not break inference.
     usage: dict[str, int] = {}
     prompt_ids = getattr(result, "prompt_token_ids", None)
     if prompt_ids is not None:

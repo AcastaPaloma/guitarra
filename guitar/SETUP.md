@@ -3,6 +3,7 @@
 Follow [DESIGN.md](DESIGN.md) for scope and [STATUS.md](STATUS.md) for actual implementation.
 This replaces the older one-arm/Open-G/π0.5/GPU-policy-server startup plan.
 No weight training, new sound classifier, physics simulator, or extra robot is required.
+**Camera input is off by default; no relay or vision model is needed for the normal path.**
 
 ## 1. Start with existing offline tests
 
@@ -11,7 +12,7 @@ Use the existing isolated `guitar/.venv/` where available:
 
 ```bash
 guitar/.venv/bin/python --version
-guitar/.venv/bin/python -m pytest guitar/tests/test_motions.py -q
+guitar/.venv/bin/python -m pytest guitar/tests/test_camera_opt_in.py guitar/tests/test_motions.py -q
 ```
 
 If setting up another machine, first review/pin an appropriate driver/dependency version.
@@ -40,28 +41,65 @@ subset and local coordination before promising two-arm songs or autonomous repet
 
 ## 3. Resolve Baseten separately from motion
 
-A client, Qwen2.5-VL configuration, and custom server adapter now exist. Test the complete
-request/response path, dependency/model loading, and deployed endpoint before presenting a
-push or smoke command as successful. Source code alone is not live inference evidence.
-[model/README.md](model/README.md) owns the current contract and validation requirements.
+The active path is **Kimi K3 on Baseten's managed Model API**, with high reasoning. A live
+synthetic tool/result round trip passed; it did not execute hardware or inspect media.
+Set `BASETEN_API_KEY` and `BASETEN_MODEL=moonshotai/Kimi-K3` in `.env`; no Truss push or
+private deployment ID is needed. [model/README.md](model/README.md) has exact commands.
+The older Qwen2.5 custom deployment recipe is inactive and unvalidated, not the current setup.
 
-Live inference needs approved credentials/spend. Deployment can incur idle GPU cost and
-is not a routine setup step. Do not silently use the CLI's current default backend
-(`claude`) when the intent is to demonstrate Baseten; select the provider explicitly.
+Live inference consumes approved account credits. The CLI now defaults to `baseten`, not
+`claude`; select alternatives explicitly. A dedicated GPU deployment is a separate decision
+and can incur idle costs. No dedicated GPU has been provisioned for this managed path.
 
 Astra/Claude are alternatives, not assumed Baseten models. API keys stay in the shell or
 ignored secret files, never in docs, logs, screenshots, or model context.
 
+### Local web console (fake tools only)
+
+```bash
+# From repository root; this leaves the parent shell's working directory unchanged.
+(cd guitar && .venv/bin/python -m web --port 8787)
+```
+
+Open **http://127.0.0.1:8787** to edit prompts/notes, start an explicitly approved Baseten run,
+inspect live fake state/tool results, use cooperative pause/stop, and download logs.
+Credentials stay server-side in `.env`; startup/page loading makes no inference request.
+There is **no hardware adapter or unlock switch**, and the Stop button is not a physical E-stop.
+See [web/README.md](web/README.md) for dependencies, local security, and commissioning gates.
+
+### Current fake-only CLI entry point
+
+With the existing `.env` key, run real inference without devices:
+
+```bash
+cd guitar
+.venv/bin/python -m orchestration --allow-inference
+# Or the initial four workflow cases:
+.venv/bin/python -m orchestration --scenario all --allow-inference
+```
+
+This runner calls the existing motion code on a fake fret arm and an explicitly synthetic
+pick fixture. It has **no hardware option** and never captures media. Audio work is parked.
+It records decisions/results and independently checks the workflow. Read
+[orchestration/README.md](orchestration/README.md) for request pacing and validation limits.
+
 ## 4. Add observation and evaluation only when needed
 
-Camera and microphone access are opt-in external actions. The existing agent enables
-capture unless `--no-camera` / `--no-mic` is passed; those flags do not rewrite its older
-prompt assumptions. Read [agent/README.md](agent/README.md) before using that CLI.
+| Input | Current default and controls |
+|---|---|
+| Camera | **Off.** No relay requests, attached images, or JPEG recordings in the default path. `--camera` is explicit diagnostic opt-in; `--no-camera` explicitly keeps it off. The two flags are mutually exclusive. |
+| Microphone | Legacy local capture is still on unless `--no-mic` is supplied. This camera change does not alter microphone defaults; use `--no-mic` for device-free tests. |
 
-Current sensing provides JPEG snapshots and local acoustic heuristics. The optional
-pretrained audio evaluator still needs recording/export, an audio-capable endpoint, and
-a bounded assessment interface. Qwen2.5-VL does not accept raw microphone audio. See
-[sense/README.md](sense/README.md). No training dataset is needed just to try that loop.
+Prompts and tool descriptions now reflect the selected inputs. A state-only `look()` does
+not fetch an image. Neither camera flag starts a relay or stops other camera software.
+Device access/media upload still require approval. Read [agent/README.md](agent/README.md).
+
+The normal path needs state/text plus available audio feedback, not a vision model. Current
+microphone code provides local heuristics. A separate [file-based evaluator](model/AUDIO.md)
+now provides explicit WAV upload and a bounded assessment interface, but its Inkling endpoint
+is still timing out. Capture/export, live assessment verification, and planner integration remain.
+The configured Kimi planner cannot accept raw microphone audio. See
+[sense/README.md](sense/README.md). No training dataset is needed for the rehearsal loop.
 
 ## 5. Build the intended rehearsal path
 
