@@ -78,7 +78,7 @@ def read_registry():
         cells, rest, warnings = grid
         if not cells or set(rest) != set(fret.MOTOR_IDS):
             raise ValueError("Record a rest pose and the needed keys first")
-        signature = b"rest_hub-v1:400:1200:0.12:30:4.0"
+        signature = b"rest_hub-v2:400:1200:0.12:30:90:4.0"  # +press tol 90 (contact stall)
         fingerprint = hashlib.sha256(raw + b"\0" + calibration_bytes + signature).hexdigest()
         return {"keys": set(cells), "grid": grid, "fingerprint": fingerprint, "warnings": warnings}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):

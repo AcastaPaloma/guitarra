@@ -67,6 +67,12 @@ TAP_SPEED = 1200   # tap press is fast — the impact is what sounds the note
 TAP_DWELL_S = 0.12  # contact time before lifting; short = staccato tap
 ACC = 30
 SETTLE_TOL = 30
+# Press stages stall AGAINST the string by design (poses are recorded already
+# pressed), so the elbow routinely stops tens of counts short of the target —
+# observed 45 on r2-c4. That is contact, not a fault; only travel/lift stages
+# keep the strict tolerance. v2 ignored settle results entirely, so PRESS_TOL
+# is still stricter than everything that played before v3.
+PRESS_TOL = 90
 SETTLE_TIMEOUT = 4.0
 
 _CELL = re.compile(r"pose[-_]?r(\d+)[-_]?c(\d+)$")
@@ -162,7 +168,7 @@ class FretArm:
         if error:
             raise error
 
-    def _move(self, pose, speed, wait=True, *, deadline=None):
+    def _move(self, pose, speed, wait=True, *, deadline=None, tol=SETTLE_TOL):
         if set(pose) != set(MOTOR_IDS) or any(type(v) is not int or not 0 <= v <= 4095
                                             for v in pose.values()):
             raise ValueError("A complete recorded body-joint pose is required")
@@ -175,7 +181,7 @@ class FretArm:
             if deadline is not None:
                 stage_deadline = min(stage_deadline, deadline)
             while time.monotonic() < stage_deadline:
-                if all((p := self.bus.read_pos(sid)) is not None and abs(p - t) <= SETTLE_TOL
+                if all((p := self.bus.read_pos(sid)) is not None and abs(p - t) <= tol
                        for sid, t in pose.items()):
                     return True  # encoder tolerance only, not string/contact evidence
                 time.sleep(0.03)
@@ -226,9 +232,9 @@ class FretArm:
         pose = self._cell(s, f)
         started, stages = time.monotonic(), []
 
-        def stage(name, target, speed):
+        def stage(name, target, speed, tol=SETTLE_TOL):
             command = time.monotonic() - started
-            self._move(target, speed, deadline=deadline)
+            self._move(target, speed, deadline=deadline, tol=tol)
             stages.append({"stage": name, "command_start_s": round(command, 4),
                            "encoder_ready_s": round(time.monotonic() - started, 4)})
 
@@ -236,7 +242,7 @@ class FretArm:
         stage("lift", lift_hub, TRAVEL_SPEED)
         if self.last_row != f and self._hub(f) is not lift_hub:
             stage("travel", self._hub(f), TRAVEL_SPEED)
-        stage("tap", pose, TAP_SPEED)                # fast press = the note
+        stage("tap", pose, TAP_SPEED, tol=PRESS_TOL)  # fast press = the note; stalls on contact
         time.sleep(TAP_DWELL_S)
         stage("lift_clear", self._hub(f), TRAVEL_SPEED)
         self.holding, self.last_row = None, f
@@ -259,7 +265,7 @@ class FretArm:
         s, f = int(string), int(fret)
         pose = self._cell(s, f)
         self._stage(f)
-        self._move(pose, PRESS_SPEED)
+        self._move(pose, PRESS_SPEED, tol=PRESS_TOL)
         self.holding, self.last_row = (s, f), f
         return {"status": "holding", "string": s, "fret": f,
                 "note_open": STRING_NOTES.get(s), "target_raw": pose,
