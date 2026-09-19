@@ -17,6 +17,7 @@ class FakeRuntime:
         self.calls = []
         self.states = ["accepted", "running", "succeeded"]
         self.available = True
+        self.entry_modes = ["measured"]
         self.fail_submit = False
         self.cancel_state = "canceled"
         self.completed = True
@@ -39,7 +40,8 @@ class FakeRuntime:
         if path == "/capabilities":
             return {"ok": True, "protocol_version": "lelamp.sdk.v1",
                     "capabilities": [{"name": "clip.play", "available": self.available}],
-                    "resources": {key: {"available": True} for key in ("joints", "clips")}}
+                    "resources": {"joints": {"available": True},
+                                  "clips": {"available": True, "entry_modes": self.entry_modes}}}
         if path == "/sessions":
             return {"ok": True, "session": {"session_id": self.session}}
         if path == "/joints":
@@ -104,6 +106,21 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(sum(c[:2] == ("POST", "/actions") for c in self.runtime.calls), 1)
         with self.assertRaises(LampError):
             self.play(clip={**self.clip, "id": "different"})
+
+    def test_held_entry_requires_advertised_support_and_never_falls_back(self):
+        with self.assertRaisesRegex(LampError, "no fallback"):
+            self.client.play_clip(self.clip, self.client.observe(), idempotency_key="held1", entry_mode="held")
+        self.assertFalse(any(c[:2] == ("POST", "/actions") for c in self.runtime.calls))
+
+    def test_held_entry_is_explicit_and_part_of_idempotency_identity(self):
+        self.runtime.entry_modes = ["measured", "held"]
+        client = self.make_client()
+        client.connect()
+        client.play_clip(self.clip, client.observe(), idempotency_key="held1", entry_mode="held")
+        payload = json.loads(next(c[2] for c in self.runtime.calls if c[:2] == ("POST", "/actions")))
+        self.assertEqual(payload["payload"], {"clip_id": "clip1", "entry_mode": "held"})
+        with self.assertRaisesRegex(LampError, "another session or payload"):
+            client.play_clip(self.clip, client.observe(), idempotency_key="held1", entry_mode="measured")
 
     def test_key_cannot_replay_after_new_session(self):
         self.play()

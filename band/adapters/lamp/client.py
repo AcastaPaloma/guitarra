@@ -55,6 +55,7 @@ class LampClient:
         self._transport = transport or self._http
         self._session = None
         self._active = None
+        self._clip_entry_modes = {"measured"}
         ledger.parent.mkdir(parents=True, exist_ok=True)
         self._ledger = sqlite3.connect(ledger)
         self._ledger.execute("CREATE TABLE IF NOT EXISTS requests (key TEXT PRIMARY KEY, session TEXT, digest TEXT, action TEXT)")
@@ -98,6 +99,10 @@ class LampClient:
         for resource in ("joints", "clips"):
             if capabilities.get("resources", {}).get(resource, {}).get("available") is not True:
                 raise LampError(f"{resource} resource is unavailable")
+        modes = capabilities["resources"]["clips"].get("entry_modes", ["measured"])
+        if not isinstance(modes, list) or any(mode not in ("measured", "held") for mode in modes):
+            raise LampError("Invalid clip entry capabilities")
+        self._clip_entry_modes = set(modes)
         result = self._request("POST", "/sessions", {"app_id": "guitarra.rehearsal", "metadata": {"version": 1}})
         self._session = result["session"]["session_id"]
         if not isinstance(self._session, str) or not self._session:
@@ -133,12 +138,16 @@ class LampClient:
         self._fresh(observation, stage.robot_id, stage.calibration_id)
         return self._request("POST", "/clips", csv=compiled.csv_bytes())["clip"]
 
-    def play_clip(self, clip, observation, *, idempotency_key):
+    def play_clip(self, clip, observation, *, idempotency_key, entry_mode="measured"):
         self._fresh(observation, clip["robot_id"], clip["calibration_id"])
+        if entry_mode not in ("measured", "held") or entry_mode not in self._clip_entry_modes:
+            raise LampError("Requested clip entry mode is unavailable; no fallback is allowed")
         if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
             raise ValueError("Use a unique, nonempty trial key of at most 128 characters")
         payload = {"command_type": "clip.play", "payload": {"clip_id": clip["id"]},
                    "idempotency_key": idempotency_key}
+        if entry_mode != "measured":
+            payload["payload"]["entry_mode"] = entry_mode
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         with self._ledger:
             existing = self._ledger.execute("SELECT session,digest,action FROM requests WHERE key=?", (idempotency_key,)).fetchone()

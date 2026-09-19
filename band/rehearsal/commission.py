@@ -142,7 +142,7 @@ def build_probe(stage, kind, joint=None):
     ], stage)
 
 
-def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=None):
+def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=None, entry_mode="measured"):
     stage = StageEnvelope(**json.loads(stage_path.read_text()))
     compiled = build_probe(stage, kind, joint)
     if not camera_log.is_file() or not capture_is_fresh(camera_log):
@@ -151,7 +151,7 @@ def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=No
     output.mkdir(parents=True, exist_ok=False)
     (output / "scene.csv").write_bytes(compiled.csv_bytes())
     (output / "stage.json").write_text(json.dumps(asdict(stage), indent=2) + "\n")
-    result = {"kind": kind, "joint": joint, "planned_seconds": compiled.duration_seconds, "camera_log": str(camera_log),
+    result = {"kind": kind, "joint": joint, "entry_mode": entry_mode, "planned_seconds": compiled.duration_seconds, "camera_log": str(camera_log),
               "started_wall_ns": time.time_ns(), "started_mono_ns": time.monotonic_ns(),
               "status": "preflight", "hardware_verified": False, "run_id": uuid.uuid4().hex}
     client = LampClient(base_url, token, output / "requests.sqlite")
@@ -176,7 +176,7 @@ def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=No
                                                "maximum_drift": held_guard.maximum_drift}
             clip = client.upload_scene(compiled, stage)
             record("validated", clip)
-            action = client.play_clip(clip, client.observe(), idempotency_key=result["run_id"])
+            action = client.play_clip(clip, client.observe(), idempotency_key=result["run_id"], entry_mode=entry_mode)
             identifier = action["action_id"]
             record("submitted", action)
 
@@ -221,6 +221,7 @@ def main():
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--kind", choices=("small", "envelope", "joint", "showcase", "dance"), required=True)
     parser.add_argument("--joint", choices=JOINTS)
+    parser.add_argument("--entry-mode", choices=("measured", "held"), default="measured")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--camera-log", type=Path, required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:18081")
@@ -228,7 +229,7 @@ def main():
     token = os.environ.get("LELAMP_SDK_TOKEN", "")
     if not token:
         parser.error("LELAMP_SDK_TOKEN is required")
-    result = run_probe(args.stage, args.kind, args.output, args.base_url, token, args.camera_log, joint=args.joint)
+    result = run_probe(args.stage, args.kind, args.output, args.base_url, token, args.camera_log, joint=args.joint, entry_mode=args.entry_mode)
     print(json.dumps({key: result[key] for key in ("run_id", "status")}, indent=2))
 
 
