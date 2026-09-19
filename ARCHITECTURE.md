@@ -1,6 +1,6 @@
 # Guitarra: lamp frontperson and robotic guitarist
 
-Status: proposed band architecture, grounded in live lamp experiments on **2026-09-19 UTC**, with a new **software-tested performance candidate**. The five-axis composer, two 40-second presets, SDK lifecycle adapter and rehearsal tools now exist. Their physical A/B verification is blocked by missing SDK authentication configuration and unresolved concurrent runtime control; no new dance has been demonstrated. See [VISUAL_FINDINGS.md](VISUAL_FINDINGS.md) and [REHEARSAL.md](REHEARSAL.md).
+Status: the five-axis composer, SDK adapter, camera recorder and supervised commissioning tools are implemented. Authenticated SDK clips have run on the physical lamp. Small yaw, waist, roll and head movements are demonstrated; elbow response remains limited and its loaded position error prevents claiming full joint health or a commissioned dance envelope. See [SDK_COMMISSIONING.md](SDK_COMMISSIONING.md). The full 40-second style A/B and audio synchronization remain unverified.
 
 The lamp is the bandleader: it listens, introduces songs, sings through the audio system, dances, acknowledges the crowd, and gives the guitarist the spotlight. The guitar unit owns both instrument arms. A master Astra makes musical and social decisions; two specialist controllers prepare the lamp and guitar parts. **A shared musical transport and local deterministic executors provide timing.** Model response latency must never determine a strum or a beat accent.
 
@@ -22,7 +22,7 @@ Evidence labels in this document:
 | Actuators | Five STS3215 servos; existing runtime owns the serial bus | Source; live position feedback and commanded movement verified |
 | Bus | Package default `/dev/lelamp`; USB serial adapter enumerates as `ttyACM0` | Source + OS enumeration |
 | Interfaces | Dashboard `8080`, robot HTTP backend `8081`, camera WebSocket listener `8082` | Measured; do not assume the camera listener's protocol is a generic video stream |
-| SDK | Routes exist and gateway is enabled in configuration, but requests return HTTP 503: SDK token required and not configured | Measured |
+| SDK | Authentication configured; capability/session/clip/action/result/cancel paths exercised | Measured; see SDK commissioning |
 | Position API | Read and write through `/api/motors/positions` work | Measured, 21 completed trials |
 | Lighting | 93-pixel panel in the package; runtime advertises a light controller | Source + status; no lighting trial performed |
 | Microphone | Runtime reports active capture and a 16 kHz wake-word path; USB camera includes an audio device | Measured status/enumeration; audio quality and audience recognition untested |
@@ -134,13 +134,13 @@ All paths below are on the robot backend, locally `http://127.0.0.1:8081`.
 | Gentle dashboard target | `POST /api/motors/positions` with `positions`, `duration` seconds or `duration_ms` | Tested; asynchronous acknowledgment, no endpoint guarantee, no collision check in this route |
 | Inspect playback | `GET /api/animations/status` | Tested; includes idle paused/playing; do not mistake it for a complete tracking-action lifecycle |
 | Stop animation/motion | `POST /api/animations/stop` | Used in trials; verify stopped state and feedback |
-| Choose idle | `POST /api/animations/idle` with `name` | Used; effects are asynchronous; verified eventual restoration |
+| Choose idle | `POST /api/animations/idle` with `name` | Clear mapping repaired; waits for configuration result; hardware idle-off verified |
 | Emergency stop | `POST /api/emergency-stop` | Source-reviewed; latches safety and disables torque; not exercised |
-| Inspect SDK | `GET /api/sdk/v1/capabilities`, `/joints` | Currently blocked by missing SDK token |
+| Inspect SDK | `GET /api/sdk/v1/capabilities`, `/joints` | Authenticated and physically exercised |
 | SDK session | `POST /api/sdk/v1/sessions` with `app_id` | Source-reviewed |
 | SDK action | `POST /api/sdk/v1/actions` | `command_type`, `payload`, `idempotency_key`; session header required |
 | SDK result/cancel | `GET /api/sdk/v1/actions/{id}`; `POST .../{id}/cancel` | Source-reviewed |
-| Validated custom motion | Upload CSV to `POST /api/sdk/v1/clips`; call `clip.play` | Source-reviewed; calibration-bound, validated before playback |
+| Validated custom motion | Upload CSV to `POST /api/sdk/v1/clips`; call `clip.play` | Physically exercised; calibration-bound, collision-checked entry and trajectory; completion does not certify tracking |
 | Media | SDK camera snapshot and multipart `streams/camera` or `streams/microphone` | Source-reviewed; metadata includes local monotonic timestamps |
 | Output routing | `GET /api/audio/output-devices` | Tested; currently only Dummy Output selected |
 

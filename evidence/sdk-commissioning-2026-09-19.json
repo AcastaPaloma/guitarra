@@ -1,0 +1,493 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-09-19",
+  "units": "normalized_m100_100",
+  "stage_hardware_verified": false,
+  "all_joints_healthy_confirmed": false,
+  "media_published": false,
+  "runs": [
+    {
+      "run_id": "47bf05ddcd8d4c1d899c293505a65abe",
+      "kind": "small",
+      "joint": null,
+      "planned_seconds": 15.0,
+      "started_wall_ns": 1789800037906545000,
+      "started_mono_ns": 449568827870541,
+      "ended_mono_ns": 449586744556375,
+      "status": "fault; hold and inspect",
+      "cancellation_terminal_state": "canceled",
+      "error_type": "RuntimeError",
+      "name": "probe-small-01",
+      "started_utc": "2026-09-19T06:40:37.906545+00:00",
+      "action": null,
+      "telemetry_samples": 82,
+      "measured_ranges": {
+        "base_pitch": {
+          "min": -52.91644771413557,
+          "max": -52.390961639516554,
+          "span": 0.5254860746190175
+        },
+        "base_yaw": {
+          "min": -3.914988814317681,
+          "max": -3.914988814317681,
+          "span": 0.0
+        },
+        "elbow_pitch": {
+          "min": -70.69825436408978,
+          "max": -68.32917705735662,
+          "span": 2.3690773067331605
+        },
+        "wrist_pitch": {
+          "min": -16.316316316316318,
+          "max": -15.715715715715717,
+          "span": 0.6006006006006004
+        },
+        "wrist_roll": {
+          "min": 2.6631853785900717,
+          "max": 2.6631853785900717,
+          "span": 0.0
+        }
+      },
+      "final_positions": null,
+      "final_minus_planned": null,
+      "round_trip_median_s": 0.03064097903552465,
+      "round_trip_max_s": 0.29490541701670736
+    },
+    {
+      "run_id": "b3964c46324141379ff45d41ead89ba9",
+      "kind": "small",
+      "joint": null,
+      "planned_seconds": 15.0,
+      "started_wall_ns": 1789800132571689000,
+      "started_mono_ns": 449663492018583,
+      "ended_mono_ns": 449682645912583,
+      "status": "executor_completed; camera and tracking review required",
+      "cancellation_terminal_state": null,
+      "error_type": null,
+      "name": "probe-small-02",
+      "started_utc": "2026-09-19T06:42:12.571689+00:00",
+      "action": {
+        "action_id": "sdk_act_d5c5895cc92d43e5",
+        "state": "succeeded",
+        "created_at": 1789800133.711408,
+        "updated_at": 1789800151.5590348,
+        "result": {
+          "collision_checked": true,
+          "completed": true,
+          "duration_seconds": 17.0,
+          "estimated_duration_seconds": 17.0,
+          "reachable": true
+        }
+      },
+      "telemetry_samples": 68,
+      "measured_ranges": {
+        "base_pitch": {
+          "min": -52.496058854440356,
+          "max": -52.285864424592745,
+          "span": 0.21019442984761127
+        },
+        "base_yaw": {
+          "min": -3.914988814317681,
+          "max": -3.914988814317681,
+          "span": 0.0
+        },
+        "elbow_pitch": {
+          "min": -73.31670822942644,
+          "max": -70.69825436408978,
+          "span": 2.6184538653366616
+        },
+        "wrist_pitch": {
+          "min": -15.715715715715717,
+          "max": -15.715715715715717,
+          "span": 0.0
+        },
+        "wrist_roll": {
+          "min": 2.6631853785900717,
+          "max": 2.6631853785900717,
+          "span": 0.0
+        }
+      },
+      "final_positions": {
+        "base_pitch": -52.390961639516554,
+        "base_yaw": -3.914988814317681,
+        "elbow_pitch": -73.19201995012469,
+        "wrist_pitch": -15.715715715715717,
+        "wrist_roll": 2.6631853785900717
+      },
+      "final_minus_planned": {
+        "base_pitch": 0.5254860746190175,
+        "base_yaw": 0.0,
+        "elbow_pitch": -4.862842892768072,
+        "wrist_pitch": 0.6006006006006004,
+        "wrist_roll": 0.0
+      },
+      "round_trip_median_s": 0.02852181252092123,
+      "round_trip_max_s": 0.26590666599804536
+    },
+    {
+      "run_id": "2a436fc1a99347b4be827140e0c7a105",
+      "kind": "envelope",
+      "joint": null,
+      "planned_seconds": 25.0,
+      "started_wall_ns": 1789800243618938000,
+      "started_mono_ns": 449774538099000,
+      "ended_mono_ns": 449803780503458,
+      "status": "executor_completed; camera and tracking review required",
+      "cancellation_terminal_state": null,
+      "error_type": null,
+      "name": "probe-envelope-01",
+      "started_utc": "2026-09-19T06:44:03.618938+00:00",
+      "action": {
+        "action_id": "sdk_act_1c3a005247ad456c",
+        "state": "succeeded",
+        "created_at": 1789800244.4496775,
+        "updated_at": 1789800272.7668645,
+        "result": {
+          "collision_checked": true,
+          "completed": true,
+          "duration_seconds": 27.0,
+          "estimated_duration_seconds": 27.0,
+          "reachable": true
+        }
+      },
+      "telemetry_samples": 83,
+      "measured_ranges": {
+        "base_pitch": {
+          "min": -56.06936416184971,
+          "max": -49.0278507619548,
+          "span": 7.04151339989491
+        },
+        "base_yaw": {
+          "min": -7.494407158836694,
+          "max": -0.6711409395973078,
+          "span": 6.823266219239386
+        },
+        "elbow_pitch": {
+          "min": -75.81047381546135,
+          "max": -73.19201995012469,
+          "span": 2.6184538653366616
+        },
+        "wrist_pitch": {
+          "min": -17.71771771771772,
+          "max": -12.712712712712715,
+          "span": 5.005005005005003
+        },
+        "wrist_roll": {
+          "min": -1.096605744125327,
+          "max": 6.005221932114878,
+          "span": 7.101827676240205
+        }
+      },
+      "final_positions": {
+        "base_pitch": -52.18076720966894,
+        "base_yaw": -4.250559284116335,
+        "elbow_pitch": -73.69077306733168,
+        "wrist_pitch": -13.913913913913916,
+        "wrist_roll": 2.767624020887723
+      },
+      "final_minus_planned": {
+        "base_pitch": 0.7356805044666288,
+        "base_yaw": -0.3355704697986539,
+        "elbow_pitch": -5.3615960099750595,
+        "wrist_pitch": 2.4024024024024015,
+        "wrist_roll": 0.10443864229765154
+      },
+      "round_trip_median_s": 0.06965991703327745,
+      "round_trip_max_s": 0.39524250000249594
+    },
+    {
+      "run_id": "b78d0e370814458c8eaacbd87c34a604",
+      "kind": "joint",
+      "joint": "elbow_pitch",
+      "planned_seconds": 25.0,
+      "started_wall_ns": 1789800549277490000,
+      "started_mono_ns": 450080204129875,
+      "ended_mono_ns": 450109472512000,
+      "status": "executor_completed; camera and tracking review required",
+      "cancellation_terminal_state": null,
+      "error_type": null,
+      "name": "joint-elbow-01",
+      "started_utc": "2026-09-19T06:49:09.277490+00:00",
+      "action": {
+        "action_id": "sdk_act_633b27545c32429c",
+        "state": "succeeded",
+        "created_at": 1789800550.1130698,
+        "updated_at": 1789800578.4392405,
+        "result": {
+          "collision_checked": true,
+          "completed": true,
+          "duration_seconds": 27.0,
+          "estimated_duration_seconds": 27.0,
+          "reachable": true
+        }
+      },
+      "telemetry_samples": 109,
+      "measured_ranges": {
+        "base_pitch": {
+          "min": -52.18076720966894,
+          "max": -51.65528113504992,
+          "span": 0.5254860746190246
+        },
+        "base_yaw": {
+          "min": -4.138702460850112,
+          "max": -4.026845637583904,
+          "span": 0.1118568232662085
+        },
+        "elbow_pitch": {
+          "min": -76.30922693266832,
+          "max": -73.69077306733168,
+          "span": 2.6184538653366474
+        },
+        "wrist_pitch": {
+          "min": -13.913913913913916,
+          "max": -13.313313313313316,
+          "span": 0.6006006006006004
+        },
+        "wrist_roll": {
+          "min": 2.767624020887723,
+          "max": 2.9765013054830405,
+          "span": 0.2088772845953173
+        }
+      },
+      "final_positions": {
+        "base_pitch": -51.86547556489753,
+        "base_yaw": -4.138702460850112,
+        "elbow_pitch": -74.18952618453865,
+        "wrist_pitch": -13.313313313313316,
+        "wrist_roll": 2.767624020887723
+      },
+      "final_minus_planned": {
+        "base_pitch": 1.0509721492380422,
+        "base_yaw": -0.2237136465324312,
+        "elbow_pitch": -5.860349127182033,
+        "wrist_pitch": 3.003003003003002,
+        "wrist_roll": 0.10443864229765154
+      },
+      "round_trip_median_s": 0.02914674999192357,
+      "round_trip_max_s": 0.28232124994974583
+    },
+    {
+      "run_id": "d743b2f5614a45da94177e74ff2f1c54",
+      "kind": "showcase",
+      "joint": null,
+      "planned_seconds": 57.5,
+      "started_wall_ns": 1789800613339168000,
+      "started_mono_ns": 450144265788375,
+      "ended_mono_ns": 450174665856708,
+      "status": "fault; hold and inspect",
+      "cancellation_terminal_state": "canceled",
+      "error_type": "RuntimeError",
+      "name": "sdk-showcase-01",
+      "started_utc": "2026-09-19T06:50:13.339168+00:00",
+      "action": null,
+      "telemetry_samples": 110,
+      "measured_ranges": {
+        "base_pitch": {
+          "min": -55.333683657383084,
+          "max": -50.28901734104046,
+          "span": 5.044666316342621
+        },
+        "base_yaw": {
+          "min": -6.375838926174495,
+          "max": -1.9015659955257291,
+          "span": 4.474272930648766
+        },
+        "elbow_pitch": {
+          "min": -76.80798004987531,
+          "max": -74.18952618453865,
+          "span": 2.6184538653366616
+        },
+        "wrist_pitch": {
+          "min": -13.313313313313316,
+          "max": -12.512512512512501,
+          "span": 0.8008008008008147
+        },
+        "wrist_roll": {
+          "min": 2.767624020887723,
+          "max": 2.8720626631853747,
+          "span": 0.10443864229765154
+        }
+      },
+      "final_positions": null,
+      "final_minus_planned": null,
+      "round_trip_median_s": 0.02829764550551772,
+      "round_trip_max_s": 0.32879120897268876
+    },
+    {
+      "run_id": "01fdd95242374ec59d7f4efd5155f350",
+      "kind": "showcase",
+      "joint": null,
+      "planned_seconds": 57.5,
+      "started_wall_ns": 1789800711505499000,
+      "started_mono_ns": 450242431332125,
+      "ended_mono_ns": 450307190098875,
+      "status": "executor_completed; camera and tracking review required",
+      "cancellation_terminal_state": null,
+      "error_type": null,
+      "name": "sdk-showcase-02",
+      "started_utc": "2026-09-19T06:51:51.505499+00:00",
+      "action": {
+        "action_id": "sdk_act_90a161abc2154728",
+        "state": "succeeded",
+        "created_at": 1789800713.4245515,
+        "updated_at": 1789800775.6369534,
+        "result": {
+          "collision_checked": true,
+          "completed": true,
+          "duration_seconds": 59.5,
+          "estimated_duration_seconds": 59.5,
+          "reachable": true
+        }
+      },
+      "telemetry_samples": 232,
+      "measured_ranges": {
+        "base_pitch": {
+          "min": -55.333683657383084,
+          "max": -50.07882291119286,
+          "span": 5.254860746190225
+        },
+        "base_yaw": {
+          "min": -6.2639821029082725,
+          "max": -1.9015659955257291,
+          "span": 4.362416107382543
+        },
+        "elbow_pitch": {
+          "min": -77.3067331670823,
+          "max": -74.68827930174564,
+          "span": 2.6184538653366616
+        },
+        "wrist_pitch": {
+          "min": -15.315315315315317,
+          "max": -12.312312312312315,
+          "span": 3.003003003003002
+        },
+        "wrist_roll": {
+          "min": 0.1566579634464773,
+          "max": 4.751958224543088,
+          "span": 4.595300261096611
+        }
+      },
+      "final_positions": {
+        "base_pitch": -53.12664214398318,
+        "base_yaw": -4.6979865771812115,
+        "elbow_pitch": -77.18204488778055,
+        "wrist_pitch": -14.914914914914917,
+        "wrist_roll": 2.5587467362924343
+      },
+      "final_minus_planned": {
+        "base_pitch": -0.21019442984761127,
+        "base_yaw": -0.7829977628635305,
+        "elbow_pitch": -8.852867830423932,
+        "wrist_pitch": 1.401401401401401,
+        "wrist_roll": -0.10443864229763733
+      },
+      "round_trip_median_s": 0.03477935399860144,
+      "round_trip_max_s": 0.3512221660348587
+    }
+  ],
+  "recordings": {
+    "envelope-video-01": {
+      "schema_version": 1,
+      "started_mono_ns": 449772908493333,
+      "started_wall_ns": 1789800241989318000,
+      "duration_requested_s": 45.0,
+      "clock": "observer time.monotonic_ns",
+      "camera_device": "0:none",
+      "camera_mirrored": null,
+      "mirroring_note": "Verify the selected camera visually for each setup",
+      "camera_latency_s": null,
+      "audio_latency_s": null,
+      "encoder_capture_time_available": false,
+      "motion_commands_sent": 0,
+      "camera_requested": true,
+      "audio_requested": false,
+      "camera_process_started_mono_ns": 449773250717166,
+      "camera_exit_code": 0,
+      "camera_encoded_frames": 1350,
+      "camera_capture_failed": false,
+      "ended_mono_ns": 449819305669208,
+      "samples": 208,
+      "failed_samples": 0,
+      "camera_verified": false
+    },
+    "joint-elbow-01/recording": {
+      "schema_version": 1,
+      "started_mono_ns": 450078896659708,
+      "started_wall_ns": 1789800547970057000,
+      "duration_requested_s": 45.0,
+      "clock": "observer time.monotonic_ns",
+      "camera_device": "0:none",
+      "camera_mirrored": null,
+      "mirroring_note": "Verify the selected camera visually for each setup",
+      "camera_latency_s": null,
+      "audio_latency_s": null,
+      "encoder_capture_time_available": false,
+      "motion_commands_sent": 0,
+      "camera_requested": true,
+      "audio_requested": false,
+      "camera_process_started_mono_ns": 450079053045250,
+      "camera_exit_code": 0,
+      "camera_encoded_frames": 1350,
+      "camera_capture_failed": false,
+      "ended_mono_ns": 450124931128041,
+      "samples": 232,
+      "failed_samples": 0,
+      "camera_verified": false
+    },
+    "sdk-showcase-01/recording": {
+      "schema_version": 1,
+      "started_mono_ns": 450142839877166,
+      "started_wall_ns": 1789800611913249000,
+      "duration_requested_s": 77.5,
+      "clock": "observer time.monotonic_ns",
+      "camera_device": "0:none",
+      "camera_mirrored": null,
+      "mirroring_note": "Verify the selected camera visually for each setup",
+      "camera_latency_s": null,
+      "audio_latency_s": null,
+      "encoder_capture_time_available": false,
+      "motion_commands_sent": 0,
+      "camera_requested": true,
+      "audio_requested": false,
+      "camera_process_started_mono_ns": 450143107189708,
+      "camera_exit_code": 0,
+      "camera_encoded_frames": 2325,
+      "camera_capture_failed": false,
+      "ended_mono_ns": 450221502581708,
+      "samples": 393,
+      "failed_samples": 0,
+      "camera_verified": false
+    },
+    "sdk-showcase-02/recording": {
+      "schema_version": 1,
+      "started_mono_ns": 450240740650250,
+      "started_wall_ns": 1789800709814806000,
+      "duration_requested_s": 77.5,
+      "clock": "observer time.monotonic_ns",
+      "camera_device": "0:none",
+      "camera_mirrored": null,
+      "mirroring_note": "Verify the selected camera visually for each setup",
+      "camera_latency_s": null,
+      "audio_latency_s": null,
+      "encoder_capture_time_available": false,
+      "motion_commands_sent": 0,
+      "camera_requested": true,
+      "audio_requested": false,
+      "camera_process_started_mono_ns": 450241316435333,
+      "camera_exit_code": 0,
+      "camera_encoded_frames": 2325,
+      "camera_capture_failed": false,
+      "ended_mono_ns": 450319797357375,
+      "samples": 383,
+      "failed_samples": 0,
+      "camera_verified": false
+    }
+  },
+  "limitations": [
+    "Single uncalibrated camera; sampled live frames, not exhaustive contact inspection.",
+    "No physical camera/audio delay calibration or audible beat reference.",
+    "Elbow motion did not track the intended bidirectional target; no mechanical cause established.",
+    "SDK clip completion does not enforce terminal tracking tolerances.",
+    "No gains, calibration, collision guards or completion tolerances changed."
+  ]
+}

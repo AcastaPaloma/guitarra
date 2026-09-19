@@ -1,5 +1,10 @@
 # Visual performance session — 2026-09-19 UTC
 
+**Current update:** authenticated SDK commissioning and camera-supervised motion
+are now working. See [SDK commissioning](SDK_COMMISSIONING.md) for subsequent
+physical runs, the idle-clear fix, tracking limitations, and current state.
+The section below is the historical first phase, before authentication repair.
+
 **Status: software candidates implemented; physical improvement not demonstrated.**
 The laptop camera and actual YouTube playback in Chrome were accessible. One
 valid 12-second recording of existing idle was captured. No new motor command,

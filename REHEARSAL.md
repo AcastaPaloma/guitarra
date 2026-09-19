@@ -1,5 +1,10 @@
 # Rehearsal commands and remaining commissioning
 
+Current hardware state and results are in [SDK_COMMISSIONING.md](SDK_COMMISSIONING.md).
+SDK authentication is configured. The physical stage remains unverified for a
+full performance because elbow tracking is limited. The full-scene instructions
+below remain gated; the new supervised probe command is provided at the end.
+
 Run from the guitarra checkout with Python 3.10 or newer. The harness uses the
 standard library. Profiles use JSON syntax, a YAML 1.2 subset. No model call is
 made in the motion timeline.
@@ -47,16 +52,16 @@ The observer sends only HTTP GETs. Request times bracket HTTP calls; they are
 not encoder acquisition times. Frame PTS and log receipt times are saved
 separately. A process exit code of zero alone is not successful capture.
 Long rehearsal captures should use 60–90 seconds to include runtime entry and
-settling. This recorder's current video-only output does not provide an audio
-reference; audio/video delay calibration and beat recording remain to implement.
+settling. The successful recordings are video-only. An audio/video attempt failed during
+capture startup; audio delay and beat alignment remain unmeasured.
 
-## Supervised hardware execution — not yet exercised
+## Full-scene execution — still gated by physical commissioning
 
-Before the first trial, coordinate exclusive motion/service control and clear
-the visible workspace. Configure an SDK token through the robot's existing
-protected environment configuration, retaining authentication, in that coordinated
-window. Do not print the token or commit it. Restarting the service was deferred
-because another operator/process restarted it during this session.
+Authentication and runtime startup were repaired in the continuation session.
+Credentials live in protected local/device files and the service environment,
+not in this repository. The device's runtime remains the sole serial owner.
+The route that clears idle was repaired and physically verified. A normal idle
+must not be restored blindly when the user requires the lamp to keep an open pose.
 
 Establish a stable planned stage pose, physically label audience/guitar and bow
 directions, and check small paths with the existing collision guards and camera.
@@ -111,3 +116,39 @@ keep visual judgments separate from encoder accuracy. Confirm restoration of
 normal idle after successful completion; on a fault inspect/hold instead of
 automatically resuming movement. No restoration claim is made for this new
 client until a physical run verifies it.
+
+
+## Camera-supervised SDK demonstration
+
+`recorded.py` starts the physical camera, requires a fresh frame, runs one SDK
+clip, and keeps the recorder alive through completion or cancellation. Inspect
+the whole lamp and clear hands/objects before invoking it. Freshness is not an
+automatic collision/clearance detector. Camera 0 is unmirrored in this setup.
+The SDK checks the entry and complete path against its collision model; that
+model does not cover every housing, cable, person, or external obstacle.
+
+The supplied evidence stage is tied to this device/calibration and the original
+planned open posture. It is **not a universal safe envelope** and remains
+`hardware_verified: false`. Do not substitute a zero pose or rebase it from sagged
+feedback. Reinspect the physical setup before any replay. Confirm no active
+animation or idle at `/api/animations/status`; coordinate other controllers.
+
+With `LELAMP_SDK_TOKEN` securely set and the SSH tunnel active:
+
+```sh
+python3 -m band.rehearsal.recorded --stage evidence/commission-stage-2026-09-19.json --kind joint --joint elbow_pitch --ffmpeg /absolute/path/to/ffmpeg --output rehearsal-media/elbow-01
+python3 -m band.rehearsal.recorded --stage evidence/commission-stage-2026-09-19.json --kind showcase --ffmpeg /absolute/path/to/ffmpeg --output rehearsal-media/showcase-01
+```
+
+These commands move hardware. The isolated test uses ±4-unit plateaus with
+2.5-second ramps; the showcase uses ±3 one-axis movements, followed by a ±2
+five-axis wiggle. The 57.5 authored seconds of showcase include all five isolated
+axes and 15 seconds of wiggle, plus the SDK's separate entry. This diagnostic is
+not the planned 40-second musical scene. No sound playback is implied.
+
+On recorder/action failure, the SDK action is canceled and confirmed terminal;
+torque is retained and idle is not automatically restarted. Inspect before a
+new action. Result status `executor_completed` is deliberately distinct from
+physical tracking approval. Never set `hardware_verified` merely because an
+SDK clip succeeded. Existing completion tolerances, gains and calibration have
+not been modified.

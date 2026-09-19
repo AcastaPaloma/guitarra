@@ -29,7 +29,7 @@ New abilities become registered actions: `groove`, `look_at_guitar`, `say`, `sin
 
 ## What needs fixing before a show
 
-The lamp selects **Dummy Output**; audible singing is not ready. The directional microphone array was not detected. Its camera view is obstructed and vision inference disabled. The SDK needs a token.
+The lamp selects **Dummy Output**; audible singing is not ready. The directional microphone array was not detected. Its camera view is obstructed and vision inference disabled. SDK authentication is configured and checked clips now run.
 
 The guitar reference provides simulation/transcription work; real arms and note timing remain unverified. We currently have only lamp access.
 
@@ -42,16 +42,16 @@ The lamp cues a solo, faces the guitar, gives it space, celebrates its final phr
 Four duet references and a full-body dance reference were played in Chrome and
 sampled visually. The candidate maps dance across all five axes: turn, waist
 pulse, opposing elbow motion, roll and smaller head accents. Two 40-second styles
-and controlled phase/support comparisons compile, with 23 regression checks
+and controlled phase/support comparisons compile, with 33 regression checks
 passing. This is implemented software, not a physically verified dance improvement.
 
 ## Recommended next step
 
-**Commission the SDK/audio and physically compare the prepared gestures.** The
-runtime restarted during inspection and another change to its lighting profile
-appeared; exclusive trial control remains unresolved. Once coordinated, verify
-the camera view and stage directions, run small A/B trials, then rehearse both
-40-second scenes. Physical results and exact replay commands are tracked in
+**Resolve the elbow response before increasing dance range.** The SDK is working,
+and supervised small-motion probes have been physically executed with an external
+camera. The loaded elbow still misses its planned posture. Audio remains Dummy
+Output. Both 40-second styles and controlled naturalness comparisons remain to
+be physically accepted; do not equate SDK clip completion with joint health. Physical results and exact replay commands are tracked in
 [VISUAL_FINDINGS.md](VISUAL_FINDINGS.md) and [REHEARSAL.md](REHEARSAL.md).
 
 Candidates: *Seven Nation Army*, *Country Roads*, *Stand by Me*, *Jolene*, and *Billie Jean*. Song/version choices are pending; none is ready yet.

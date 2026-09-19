@@ -1,5 +1,9 @@
 # Performance candidate changes
 
+Current continuation: see [SDK_COMMISSIONING.md](SDK_COMMISSIONING.md) for deployed
+SDK/idle repair, supervised physical results, recorder fixes, and 33 regression
+checks. The initial implementation record below predates that continuation.
+
 Implementation commit: `f4afc86` (local; not pushed).
 
 - `band/performance/primitives.py`: versioned primitives, explicit joint masks,
@@ -25,3 +29,19 @@ No lamp runtime source, calibration, gains, safety limits, or completion
 tolerances were changed. New choreography has not been sent to the lamp.
 See [visual evidence and outstanding physical work](VISUAL_FINDINGS.md) and
 [exact rehearsal commands](REHEARSAL.md).
+
+
+## SDK commissioning continuation
+
+- `band/rehearsal/commission.py`: bounded one-axis/combined diagnostics, fixed
+  baseline, idle-free preflight, SDK completion/cancel and camera watchdog.
+- `band/rehearsal/recorded.py`: fresh-camera startup and joined recorder lifecycle.
+- `band/rehearsal/observe.py`, `execute.py`: concurrent timestamp race correction;
+  video live frame output and optional audio capture support (audio unverified).
+- `tests/test_commission.py`, `test_recorded.py`, `test_observe.py`: regression
+  coverage for actual diagnostic/capture faults. Total local suite: 33 passing.
+- Runtime commit `2fb7457`: `set_idle` maps clear to `none` and waits for the real
+  configuration result; five route regressions plus existing SDK tests pass.
+- `SDK_COMMISSIONING.md` and `evidence/`: timestamped results and limitations;
+  media stays local, the stage remains unverified, and no calibration/gains/
+  completion limits were changed.
