@@ -19,11 +19,25 @@ from tkinter import messagebox, simpledialog, ttk
 
 import serial
 
+import kinematics
+
 PORT = "/dev/cu.wchusbserial5B8E1128501"
 BAUD = 1_000_000
 MOTOR_IDS = [7, 8, 9, 10, 11]  # bottom of the arm to top; gripper 12 never commanded
 JOINT_NAMES = {7: "base", 8: "shoulder", 9: "elbow", 10: "wrist_flex", 11: "wrist_roll"}
 KEYFRAMES_PATH = Path(__file__).parent / "keyframes_arm2.json"
+
+
+def enrich_keyframe(entry):
+    """Attach derived views to a keyframe: per-joint degrees relative to the
+    captured reference pose and the fingertip's world XYZ (see kinematics.py).
+    Raw counts in "positions" stay the played source of truth; playback code
+    ignores these extra keys. No-ops to None if no reference is captured."""
+    cal = kinematics.load_calibration()
+    counts = {int(s): p for s, p in entry["positions"].items()}
+    entry["degrees"] = kinematics.joint_degrees(counts, cal)
+    entry["xyz_cm"] = kinematics.tip_xyz(counts, cal)
+    return entry
 
 # STS3215 register addresses
 REG_TORQUE_ENABLE = 40
@@ -285,9 +299,13 @@ class App:
                                       initialvalue=f"pose_{len(self.keyframes) + 1}")
         if not name:
             return
-        self.keyframes.append({"name": name, "time": datetime.now().isoformat(timespec="seconds"),
-                               "positions": pose})
+        entry = enrich_keyframe({"name": name,
+                                 "time": datetime.now().isoformat(timespec="seconds"),
+                                 "positions": pose})
+        self.keyframes.append(entry)
         KEYFRAMES_PATH.write_text(json.dumps(self.keyframes, indent=2))
+        print(f"keyframe '{name}': counts={pose} degrees={entry['degrees']} "
+              f"xyz_cm={entry['xyz_cm']}", flush=True)
         self.refresh_kf_list()
 
     def goto_keyframe(self):
@@ -367,6 +385,7 @@ class App:
                 new_pos[str(sid)] = max(lo, min(hi, val))
             kf["name"] = name_e.get().strip() or kf["name"]
             kf["positions"] = new_pos
+            enrich_keyframe(kf)  # keep degrees/xyz in step with the edited counts
             KEYFRAMES_PATH.write_text(json.dumps(self.keyframes, indent=2))
             self.refresh_kf_list()
             self.kf_list.selection_set(idx)
