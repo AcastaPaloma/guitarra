@@ -6,6 +6,10 @@ same network. The hostname alternative is
 the existing dashboard pairing and CSRF protection. The dashboard is already
 hosted by `lelamp-runtime.service`, including after a device reboot.
 
+For beat-matched 30-second routines using your saved takes, see the separate
+[Dance tab guide](DANCING.md). Dance retimes disclosed excerpts; Teach replay
+continues to preserve full recordings and their original timing.
+
 ## Factory motion is disabled on this lamp
 
 `config/local/robot.local.yaml` in the live runtime persistently disables idle,
@@ -106,7 +110,7 @@ Implementation is in `/home/lelamp/lelamp-hackathon-2026`:
 - Regression checks: `tests/unit/test_teaching.py`, frontend
   `tests/teaching.test.mjs`, and `tests/teaching_dom_smoke.cjs`.
 
-`runtime-patches/teaching-ui.patch` preserves these source changes in the guitarra
+`runtime-patches/teaching-ui.patch` preserves both Teach and Dance source changes in the guitarra
 repository. Apply it only to a compatible runtime checkout where it is not
 already applied, then rebuild the dashboard with `npm run build` in
 `apps/dashboard/frontend`. Compiled assets are not included in the patch.
