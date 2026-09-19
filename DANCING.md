@@ -46,6 +46,22 @@ The fix was tested against the actual running legacy backend with the GET-only
 temporary 503 startup responses. HTML error pages are no longer dumped into the
 dashboard. The frontend build and all 29 frontend tests passed after this fix.
 
+### If Prepare briefly loaded and then disappeared
+
+Refresh the page for the preview-persistence fix; no robot restart is needed.
+The runtime correctly returned a prepared dance, but its idle status contained
+`id: null`. The UI incorrectly matched that against its own empty playback ID
+and cleared the preview every half-second. Only an actual owned playback can
+now consume a preview, and delayed status responses from before Start/Stop are
+ignored. The header says **Ready to dance** when preparation succeeds.
+
+The regression test now uses the real null-valued idle response and verifies
+the preview survives several polls, including a delayed pre-start response.
+`tests/dancing_live_prepare_smoke.cjs` also exercises the actual runtime and
+React Prepare flow, retaining the choreography and enabled Start button across
+multiple idle polls. That probe permits only GETs and non-moving preparation;
+it cannot start sound, move the lamp, or restart it.
+
 ### Lamp-speaker availability
 
 Dance audio currently plays on the laptop. A read-only device check on this lamp
