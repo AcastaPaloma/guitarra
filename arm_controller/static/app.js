@@ -10,6 +10,40 @@ let heartbeatTimer, meterTimer, audioUrl, historyAudioUrl, lastReview, sessionHi
 let foreignActive = false, stoppingPromise = null;
 
 const say = (text, error = false) => { $('status').textContent = text; $('status').className = error ? 'err' : ''; };
+
+// Pace estimator: per-note and per-phase durations learned by EMA and kept in
+// localStorage, so progress/ETA reflect THIS rig rather than fixed guesses.
+const paceEstimates = (() => {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem('guitarra.pace.v1') || '{}'); } catch (_) {}
+  const defaults = {note_s: 2.2, reviewing_s: 8, revising_s: 10};
+  return {
+    get: key => (typeof stored[key] === 'number' && stored[key] > 0 && stored[key] < 300 ? stored[key] : defaults[key]),
+    update(key, seconds) {
+      if (!(seconds > 0) || seconds > 300) return;
+      stored[key] = Math.round((0.6 * this.get(key) + 0.4 * seconds) * 100) / 100;
+      try { localStorage.setItem('guitarra.pace.v1', JSON.stringify(stored)); } catch (_) {}
+    },
+  };
+})();
+const noteTrack = {index: null, since: 0};
+const phaseTrack = {phase: null, since: 0};
+
+function phaseBar(phase) {
+  // Waiting phases have no server-side progress; estimate against the typical
+  // duration, asymptotically approaching (never claiming) completion.
+  const now = performance.now() / 1000;
+  if (phaseTrack.phase !== phase) { finishPhaseBar(); phaseTrack.phase = phase; phaseTrack.since = now; }
+  const typical = paceEstimates.get(`${phase}_s`), elapsed = now - phaseTrack.since;
+  $('fill').style.width = `${Math.min(1 - Math.exp(-elapsed / typical), 0.95) * 100}%`;
+  $('count').textContent = `${phase} · ${elapsed.toFixed(0)}s elapsed · typically ≈${Math.round(typical)}s`;
+}
+
+function finishPhaseBar() {
+  if (!phaseTrack.phase) return;
+  paceEstimates.update(`${phaseTrack.phase}_s`, performance.now() / 1000 - phaseTrack.since);
+  phaseTrack.phase = null;
+}
 const step = n => [1, 2, 3, 4].forEach(i => { $('st' + i).className = i === n ? 'on' : i < n ? 'done' : ''; });
 const pitch = n => config?.keys.find(k => k.string === n.string && k.fret === n.fret)?.pitch || `s${n.string}f${n.fret}`;
 const brief = text => (text || '').length > 220 ? text.slice(0, 217) + '…' : text || '';
@@ -167,6 +201,7 @@ function requestStop(reason = 'Stopped by operator.') {
 $('stop').onclick = () => { if (foreignActive) stoppingPromise = null; void requestStop(); };
 
 function resetReview() {
+  noteTrack.index = null; phaseTrack.phase = null;
   lastReview = null; $('review').hidden = false; $('proposal').hidden = true;
   $('apply').hidden = true; $('repeat').hidden = true;
   $('assessment-status').textContent = 'recording';
@@ -182,8 +217,24 @@ function showProgress(record, offset) {
   const note = record.plan.notes[record.index];
   $('now-pitch').textContent = note ? pitch(note) : '…';
   $('now-note').textContent = note ? `s${note.string} · f${note.fret}` : 'preparing';
-  $('count').textContent = `${record.completed_notes}/${record.total} tap commands`;
-  $('fill').style.width = `${record.completed_notes / record.total * 100}%`;
+  if (record.phase === 'playing') {
+    const now = performance.now() / 1000;
+    if (noteTrack.index !== record.completed_notes) {
+      if (noteTrack.index !== null && record.completed_notes > noteTrack.index)
+        paceEstimates.update('note_s', (now - noteTrack.since) / (record.completed_notes - noteTrack.index));
+      noteTrack.index = record.completed_notes; noteTrack.since = now;
+    }
+    const pace = paceEstimates.get('note_s');
+    const withinNote = Math.min((now - noteTrack.since) / pace, 0.95);
+    const left = Math.max(0, (record.total - record.completed_notes) * pace - (now - noteTrack.since));
+    $('fill').style.width = `${(record.completed_notes + withinNote) / record.total * 100}%`;
+    $('count').textContent = `${record.completed_notes}/${record.total} tap commands · ≈${Math.ceil(left)}s left`;
+  } else if (record.phase === 'reviewing' || record.phase === 'revising') {
+    phaseBar(record.phase);
+  } else {
+    $('count').textContent = `${record.completed_notes}/${record.total} tap commands`;
+    $('fill').style.width = `${record.completed_notes / record.total * 100}%`;
+  }
   document.querySelectorAll('.note').forEach((node, i) => {
     const index = i - offset;
     node.className = 'note' + (index >= 0 && index < record.total ? ' selected' : '') +
@@ -267,6 +318,7 @@ async function runTake() {
       const record = await api(`/api/attempts/${attemptId}`);
       showProgress(record, selected.start);
       if (terminal.has(record.phase)) {
+        finishPhaseBar();
         current = record;
         if (record.playback_outcome !== 'completed' && recorder) await requestStop(record.error || 'Take interrupted.');
         showReview(record); break;

@@ -58,7 +58,15 @@ Do not claim precise pitch/onset timestamps or millisecond improvements from thi
 Judge rhythm only if the intended timing is specified and discernible; otherwise not_assessed.
 There is no prior clip here, so do not claim an improvement or compare recordings.
 For an unusable recording, notes_match and timing_match must be uncertain or not_assessed.
-Return exactly the requested JSON assessment, including limitations. No markdown or tool calls.
+Return ONLY a JSON object with EXACTLY these six fields and no others (some providers do
+not enforce the attached response schema, so this text is the contract):
+  "recording_quality": "usable" | "limited" | "unusable" | "uncertain"
+  "notes_match":  "consistent" | "inconsistent" | "uncertain" | "not_assessed"
+  "timing_match": "consistent" | "inconsistent" | "uncertain" | "not_assessed"
+  "summary": one string, 1-1000 chars
+  "observations": array of 0-8 strings (each 1-500 chars)
+  "limitations": array of 1-8 strings (each 1-500 chars)
+Do not echo the context fields (attempt_id etc.). No markdown or tool calls.
 """
 
 
