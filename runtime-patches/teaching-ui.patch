@@ -153,7 +153,7 @@ index ceaabd9..d005474 100644
  }
 diff --git a/apps/dashboard/frontend/src/api/types/dancing.ts b/apps/dashboard/frontend/src/api/types/dancing.ts
 new file mode 100644
-index 0000000..3a0d811
+index 0000000..a9e0fe8
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/api/types/dancing.ts
 @@ -0,0 +1,17 @@
@@ -171,7 +171,7 @@ index 0000000..3a0d811
 +  frames: number; neutral_hold_seconds: number; preview: Array<{ t: number; positions: Record<string, number> }>;
 +}
 +export interface PreparedDance { id: string; expires_in: number; report: DanceReport }
-+export interface DanceStatus { version: number; server_time: number; id?: string; song_id?: string; state?: string; start_at?: number; error?: string }
++export interface DanceStatus { version: number; server_time: number; id?: string | null; song_id?: string | null; state?: string | null; start_at?: number | null; error?: string | null }
 +export interface DanceCatalog { version: number; songs: DanceSong[]; neutral_valid: boolean; error?: string;
 +  actions: Array<{ name: string; role: string; max_speed: number; window: number[] }>; }
 diff --git a/apps/dashboard/frontend/src/api/types/index.ts b/apps/dashboard/frontend/src/api/types/index.ts
@@ -492,10 +492,10 @@ index 0000000..99eaa89
 +}
 diff --git a/apps/dashboard/frontend/src/views/DancingView.tsx b/apps/dashboard/frontend/src/views/DancingView.tsx
 new file mode 100644
-index 0000000..089be60
+index 0000000..ff4649f
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/views/DancingView.tsx
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,283 @@
 +import { useCallback, useEffect, useRef, useState } from 'react';
 +import { AudioLines, Check, Disc3, FileAudio, Music2, Play, RefreshCw, Shuffle, Square } from 'lucide-react';
 +import { dashboardApi, errorMessage, ApiError } from '../api/dashboardClient';
@@ -549,6 +549,7 @@ index 0000000..089be60
 +  };
 +  const stop = async () => {
 +    stopSound();
++    if (ownedRun.current) setPrepared(null);
 +    ownedRun.current = null;
 +    scheduled.current = null;
 +    try { await dashboardApi.stopAnimation(); }
@@ -575,12 +576,13 @@ index 0000000..089be60
 +
 +  const poll = async () => {
 +    if (startingRun.current) return;
++    const pollingOwner = ownedRun.current;
 +    const sent = Date.now();
 +    try {
-+      const result = ownedRun.current
-+        ? await dashboardApi.danceHeartbeat(ownedRun.current).catch(() => dashboardApi.getDanceStatus())
++      const result = pollingOwner
++        ? await dashboardApi.danceHeartbeat(pollingOwner).catch(() => dashboardApi.getDanceStatus())
 +        : await dashboardApi.getDanceStatus();
-+      if (!mounted.current || startingRun.current) return;
++      if (!mounted.current || startingRun.current || ownedRun.current !== pollingOwner) return;
 +      const received = Date.now(), rtt = received - sent;
 +      if (rtt < clockRtt.current + 20) {
 +        clockRtt.current = rtt;
@@ -588,13 +590,13 @@ index 0000000..089be60
 +      }
 +      setStatus(result);
 +      if (result.error) setError(result.error);
-+      if (ownedRun.current && result.id !== ownedRun.current) {
++      if (pollingOwner && result.id !== pollingOwner) {
 +        ownedRun.current = null;
 +        scheduled.current = null;
 +        stopSound();
 +        setPrepared(null);
 +      }
-+      if (result.id === ownedRun.current && result.start_at && ['countdown', 'playing'].includes(result.state || '') && scheduled.current !== result.id) {
++      if (pollingOwner && result.id === pollingOwner && result.start_at && ['countdown', 'playing'].includes(result.state || '') && scheduled.current !== result.id) {
 +        const selected = playback.current;
 +        if (!selected) throw new Error('Playback preview is unavailable');
 +        if (rtt > 700) throw new Error('Connection is too slow for a synchronized start');
@@ -602,12 +604,15 @@ index 0000000..089be60
 +          selected.report.beats, selected.report.meter, selected.audio?.buffer, selected.offset);
 +        scheduled.current = result.id;
 +      }
-+      if (result.id === ownedRun.current && !ACTIVE.includes(result.state || '')) {
++      // null === null means "nothing has played yet", not "our run ended".
++      // Only a real owned playback may consume its prepared preview.
++      if (pollingOwner && result.id === pollingOwner && !ACTIVE.includes(result.state || '')) {
 +        ownedRun.current = null;
 +        stopSound();
 +        setPrepared(null);
 +      }
 +    } catch (failure) {
++      if (!mounted.current || startingRun.current || ownedRun.current !== pollingOwner) return;
 +      if (ownedRun.current) { setError(errorMessage(failure)); await stop(); }
 +      else if (mounted.current && failure instanceof ApiError && [404, 405].includes(failure.status)) {
 +        setCatalog(null); setPrepared(null); setNeedsUpdate(true); setError('');
@@ -718,7 +723,7 @@ index 0000000..089be60
 +  const currentCue = report?.cues.find(cue => cue.start <= elapsed && cue.end > elapsed);
 +  const locked = active || Boolean(busy);
 +  const stateLabel = status?.state === 'to_neutral' ? 'Going to neutral' : status?.state === 'countdown' ? `Starting in ${countdown.toFixed(1)}s`
-+    : status?.state === 'playing' ? 'Dancing' : status?.state === 'preparing' ? 'Checking entry' : status?.state === 'completed' ? 'Back at neutral' : 'Stage is yours';
++    : status?.state === 'playing' ? 'Dancing' : status?.state === 'preparing' ? 'Checking entry' : prepared ? 'Ready to dance' : status?.state === 'completed' ? 'Back at neutral' : 'Stage is yours';
 +
 +  return <div className="dance-view" style={{ '--dance-accent': song.color } as React.CSSProperties}>
 +    <header className="dance-heading"><div><span className="dance-eyebrow">THE LAMP SESSIONS · VOL. 01</span><h1>Small lamp. Big moves.</h1><p>Five songs. Your moves. A different groove every time.</p></div><span className={`dance-live ${active ? 'active' : ''}`}><span />{stateLabel}</span></header>
@@ -2742,10 +2747,10 @@ index 0000000..9cff781
 +]
 diff --git a/tests/dancing_dom_smoke.cjs b/tests/dancing_dom_smoke.cjs
 new file mode 100644
-index 0000000..c379e95
+index 0000000..936887d
 --- /dev/null
 +++ b/tests/dancing_dom_smoke.cjs
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,143 @@
 +/* Actual React interactions; all device APIs and audio are simulated. */
 +const assert = require('node:assert/strict');
 +const path = require('node:path');
@@ -2758,7 +2763,7 @@ index 0000000..c379e95
 +  url: 'http://dance.test', runScripts: 'dangerously', pretendToBeVisual: true,
 +});
 +const w = dom.window;
-+const state = { requests: [], status: {}, audioStarts: 0, audioStops: 0, oldBackend: false, failPrepare: false, warming: 0 };
++const state = { requests: [], status: { id: null, state: null, song_id: null, start_at: null, error: null }, audioStarts: 0, audioStops: 0, oldBackend: false, failPrepare: false, warming: 0 };
 +const audioNode = () => ({
 +  gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, frequency: {},
 +  connect() {}, disconnect() {}, start() { state.audioStarts++; }, stop() { state.audioStops++; },
@@ -2783,7 +2788,13 @@ index 0000000..c379e95
 +    if (state.warming > 0) { state.warming--; return new Response(JSON.stringify({ error: 'Main program is not running' }), { status: 503 }); }
 +    result = { version: 1, songs, neutral_valid: true, actions: [{ name: 'teach_nod_t02' }] };
 +  }
-+  if (url === '/api/dances/status') result = { ...state.status, server_time: Date.now() / 1000 };
++  if (url === '/api/dances/status') {
++    result = { ...state.status, server_time: Date.now() / 1000 };
++    if (state.delayNextStatus) {
++      state.delayNextStatus = false;
++      await new Promise(resolve => { state.releaseStaleStatus = resolve; });
++    }
++  }
 +  if (url === '/api/animations/play') {
 +    assert.ok(data.dance, 'must use the explicit dance operation');
 +    if (data.dance.operation === 'prepare') {
@@ -2828,6 +2839,12 @@ index 0000000..c379e95
 +    assert.equal(button('Start 30s dance').disabled, true);
 +    click('Prepare dance');
 +    await until(() => !button('Start 30s dance').disabled);
++    // The real backend returns explicit nulls before any run, not undefined.
++    // A preview must survive multiple status polls before the operator starts.
++    await new Promise(r => setTimeout(r, 1300));
++    assert.equal(button('Start 30s dance').disabled, false, 'idle null status must not erase the prepared dance');
++    assert.ok(w.document.querySelector('[aria-label="30-second choreography"]'));
++    assert.ok(w.document.body.textContent.includes('Ready to dance'));
 +    assert.equal(operations('start').length, 0, 'preparing never starts movement');
 +    click('Hear audio only');
 +    await until(() => state.audioStarts > 0 && button('Stop audio preview'));
@@ -2838,7 +2855,11 @@ index 0000000..c379e95
 +    await until(() => operations('prepare').length === 2 && !button('Start 30s dance').disabled);
 +    assert.equal(operations('prepare').at(-1).data.dance.variation, 1);
 +    const before = state.audioStarts;
++    state.delayNextStatus = true;
++    await until(() => Boolean(state.releaseStaleStatus));
 +    click('Start 30s dance');
++    await until(() => state.status.state === 'countdown');
++    state.releaseStaleStatus();
 +    await until(() => operations('heartbeat').length > 0 && state.audioStarts > before);
 +    assert.equal(button('Start 30s dance').disabled, true);
 +    assert.equal(button('Prepare dance').disabled, true);
@@ -2915,6 +2936,67 @@ index 0000000..d6c3827
 +    assert.equal(button('Start 30s dance').disabled, true);
 +    assert.equal(w.document.body.textContent.includes('<!doctype'), false);
 +    console.log(`PASS: live legacy backend returned ${codes.join(', ')}; actual React UI shows upgrade and blocks motion. GET-only.`);
++  } finally { w.close(); }
++})().catch(error => { console.error(error); process.exitCode = 1; });
+diff --git a/tests/dancing_live_prepare_smoke.cjs b/tests/dancing_live_prepare_smoke.cjs
+new file mode 100644
+index 0000000..120c524
+--- /dev/null
++++ b/tests/dancing_live_prepare_smoke.cjs
+@@ -0,0 +1,55 @@
++/* Live backend + actual React Prepare flow. No motor/audio/restart operations.
++ * Only catalog/status GETs and the non-moving prepare operation are permitted.
++ */
++const assert = require('node:assert/strict');
++const path = require('node:path');
++const { JSDOM } = require(process.argv[2]);
++const frontend = path.resolve(__dirname, '../apps/dashboard/frontend');
++const { buildSync } = require(path.join(frontend, 'node_modules/esbuild'));
++const dom = new JSDOM('<!doctype html><div id="root"></div>', {
++  url: 'http://dance.test', runScripts: 'dangerously', pretendToBeVisual: true,
++});
++const w = dom.window, requests = [];
++w.fetch = async (url, init = {}) => {
++  const method = init.method || 'GET';
++  if (url === '/api/auth/session') return new Response(JSON.stringify({ authenticated: true, csrf_token: 'simulation' }));
++  const payload = init.body ? JSON.parse(init.body) : null;
++  assert.ok((method === 'GET' && ['/api/dances', '/api/dances/status'].includes(url)) ||
++    (method === 'POST' && url === '/api/animations/play' && payload?.dance?.operation === 'prepare'),
++    'probe must not start/stop motion, sound, or the runtime');
++  requests.push({ url, method, operation: payload?.dance?.operation });
++  return fetch(`http://127.0.0.1:8081${url}`, {
++    method, body: init.body, headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(16000),
++  });
++};
++const bundle = buildSync({ stdin: { resolveDir: frontend, loader: 'tsx', contents: `
++  import React from 'react';
++  import { createRoot } from 'react-dom/client';
++  import { DancingView } from './src/views/DancingView';
++  createRoot(document.getElementById('root')).render(<DancingView programRunning={true}/>);
++` }, bundle: true, format: 'iife', write: false, define: { 'process.env.NODE_ENV': '"production"' } });
++w.eval(bundle.outputFiles[0].text);
++const button = label => [...w.document.querySelectorAll('button')].find(b => b.textContent.trim() === label);
++async function until(check) {
++  for (let i = 0; i < 600; i++) {
++    if (check()) return;
++    await new Promise(r => setTimeout(r, 30));
++  }
++  throw new Error(`UI timeout: ${w.document.body.textContent}`);
++}
++(async () => {
++  try {
++    await until(() => button('Prepare dance') && !button('Prepare dance').disabled);
++    button('Prepare dance').click();
++    await until(() => !button('Start 30s dance').disabled);
++    const polls = requests.filter(r => r.url === '/api/dances/status').length;
++    await new Promise(r => setTimeout(r, 2200));
++    assert.ok(requests.filter(r => r.url === '/api/dances/status').length >= polls + 3);
++    assert.equal(button('Start 30s dance').disabled, false);
++    assert.ok(w.document.querySelector('[aria-label="30-second choreography"]'));
++    assert.ok(w.document.body.textContent.includes('Ready to dance'));
++    assert.equal(w.document.querySelector('[role="alert"]'), null);
++    assert.equal(requests.filter(r => r.method === 'POST').length, 1);
++    console.log('PASS: live Waterloo preparation, real choreography, preview retained over multiple idle polls, Start remains enabled. No motion, audio, or restart requested.');
 +  } finally { w.close(); }
 +})().catch(error => { console.error(error); process.exitCode = 1; });
 diff --git a/tests/teaching_dom_smoke.cjs b/tests/teaching_dom_smoke.cjs
