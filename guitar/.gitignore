@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+runs/
+.DS_Store
+pi05/checkpoints/
+*.egg-info/
+.env
+runs/
