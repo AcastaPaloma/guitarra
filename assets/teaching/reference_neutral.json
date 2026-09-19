@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "saved_at": 1789806558.9004655,
+  "robot_id": "lelamp_v1_pi5_feetech_r1",
+  "calibration_id": "6db033866d113894de08ede96015882bc406b38dd364a4476e9fa3d50ce00077",
+  "units": "normalized_m100_100",
+  "positions": {
+    "base_yaw": -2.572706935123051,
+    "base_pitch": -52.601156069364166,
+    "elbow_pitch": -45.6359102244389,
+    "wrist_roll": 5.16971279373368,
+    "wrist_pitch": 42.14214214214215
+  }
+}
