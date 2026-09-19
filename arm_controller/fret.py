@@ -1,5 +1,9 @@
-"""Fretting tools for the second arm (IDs 7-11) — v2, built on the operator's
-re-recorded keypoint grid. Tool layer only; backend (Baseten) wired later.
+"""Tapping/fretting tools for the ONLY working arm (IDs 7-12) — v3 single-arm.
+
+THE PLUCK ARM (IDs 5,6,1,2,7,3) IS OUT OF SERVICE (2026-09-19). This arm is
+the whole instrument now: it sounds notes by TAPPING the pre-recorded keys
+(hammer-on style — press the string onto the fret fast, then lift). pluck.py
+is retired; do not wire its tools into any backend.
 
 v2 MAPPING (2026-09-19, supersedes the old 110-pose fret map — the operator
 found it inaccurate; do NOT fall back to guitar/robot/poses/fret_arm.json):
@@ -23,6 +27,8 @@ staging (see git history of this file for that implementation).
 CLI:
   uv run --with pyserial python fret.py --list
   uv run --with pyserial python fret.py --pose 3 2      # string 3, fret 2 (no motion)
+  uv run --with pyserial python fret.py --tap 3 2       # tap one key (sounds the note)
+  uv run --with pyserial python fret.py --seq 1,1 2,1 3,2   # tap several keys in order
   uv run --with pyserial python fret.py --hold 3 2
   uv run --with pyserial python fret.py --release --rest
 """
@@ -33,7 +39,7 @@ from pathlib import Path
 
 from app import FeetechBus
 
-FRET_PORT = "/dev/cu.usbmodem5AB01811681"  # re-enumerates on replug — check ls /dev/cu.usbmodem*
+FRET_PORT = "/dev/cu.wchusbserial5B8E1128501"  # re-enumerates on replug — check ls /dev/cu.*
 BAUD = 1_000_000
 
 KEYFRAMES_PATH = Path(__file__).parent / "keyframes_arm2.json"
@@ -44,6 +50,8 @@ MAX_FRET = 3  # first rows only, per operator (r4 was partially recorded; ignore
 
 TRAVEL_SPEED = 400
 PRESS_SPEED = 250
+TAP_SPEED = 1200   # tap press is fast — the impact is what sounds the note
+TAP_DWELL_S = 0.12  # contact time before lifting; short = staccato tap
 ACC = 30
 SETTLE_TOL = 30
 SETTLE_TIMEOUT = 4.0
@@ -117,6 +125,29 @@ class FretArm:
 
     # ---- tools ----------------------------------------------------------
 
+    def tap_key(self, string, fret):
+        """Tap (string, fret): fast press to sound the note, brief dwell, lift.
+
+        The only way this rig makes sound now — the tap impact is the attack.
+        Routes via rest like every transition (scrape-safe)."""
+        pose = self._cell(int(string), int(fret))
+        self._move(self.rest_pose, TRAVEL_SPEED)   # safe hub
+        self._move(pose, TAP_SPEED)                # fast press = the note
+        time.sleep(TAP_DWELL_S)
+        self._move(self.rest_pose, TRAVEL_SPEED)   # lift
+        self.holding = None
+        return {"status": "tapped", "string": int(string), "fret": int(fret),
+                "note_open": STRING_NOTES.get(int(string))}
+
+    def tap_sequence(self, keys, gap_s=0.3):
+        """Tap several (string, fret) keys in order with a fixed gap."""
+        results = []
+        for s, f in keys:
+            results.append(self.tap_key(s, f))
+            if gap_s:
+                time.sleep(gap_s)
+        return results
+
     def hold_fret(self, string, fret):
         """Press (string, fret) and HOLD. Routes via rest — never slides on the board."""
         pose = self._cell(int(string), int(fret))
@@ -139,15 +170,54 @@ class FretArm:
         return {"status": "rest"}
 
 
+# The COMPLETE tool surface for the rig — single arm, tap-based. The pluck
+# arm's tools (pluck.py) are retired and must not be added to any backend.
 TOOLS = [
     {
+        "name": "tap_key",
+        "description": "Tap one pre-recorded key to SOUND its note (fast press "
+                       "onto the fret, brief dwell, lift back to rest). This is "
+                       "the only way this rig makes sound. String 1 = high E "
+                       "(rightmost) ... 6 = low E (leftmost); ONLY frets 1-3 are "
+                       "mapped. Transit is scrape-safe (routes via rest); "
+                       "callers never plan paths.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "string": {"type": "integer", "minimum": 1, "maximum": 6},
+                "fret": {"type": "integer", "minimum": 1, "maximum": 3},
+            },
+            "required": ["string", "fret"],
+        },
+    },
+    {
+        "name": "tap_sequence",
+        "description": "Tap several keys in order with a fixed gap between taps. "
+                       "Same mapping and safety guarantees as tap_key.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 1},
+                        "minItems": 2, "maxItems": 2,
+                        "description": "[string, fret]",
+                    },
+                },
+                "gap_s": {"type": "number", "default": 0.3,
+                          "description": "seconds between taps"},
+            },
+            "required": ["keys"],
+        },
+    },
+    {
         "name": "hold_fret",
-        "description": "Press and HOLD a string at a fret with the fretting arm. "
-                       "String 1 = high E (rightmost) ... 6 = low E (leftmost). "
-                       "ONLY frets 1-3 are mapped for now. Stays pressed until "
-                       "release_fret or another hold_fret. Transit is scrape-safe "
-                       "(routes via the rest pose); callers never plan paths. "
-                       "Sounding the note is the plucking arm's job.",
+        "description": "Press and HOLD a string at a fret (no tap attack — "
+                       "quiet press, e.g. to mute or prep). Stays pressed until "
+                       "release_fret or another hold_fret. Same mapping as "
+                       "tap_key; transit is scrape-safe.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -194,6 +264,10 @@ def dispatch(arm, tool_name, args):
                     "recorded_cells": sorted(cells)}
         return {"string": s, "fret": f, "note_open": STRING_NOTES.get(s),
                 "target_raw": cells[(s, f)], "recorded_cells": sorted(cells)}
+    if tool_name == "tap_key":
+        return arm.tap_key(args["string"], args["fret"])
+    if tool_name == "tap_sequence":
+        return arm.tap_sequence(args["keys"], float(args.get("gap_s", 0.3)))
     if tool_name == "hold_fret":
         return arm.hold_fret(args["string"], args["fret"])
     if tool_name == "release_fret":
@@ -206,9 +280,12 @@ def dispatch(arm, tool_name, args):
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="Fretting tool CLI (v2 grid)")
+    ap = argparse.ArgumentParser(description="Single-arm tap/fret tool CLI (v2 grid)")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--pose", nargs=2, type=int, metavar=("STRING", "FRET"))
+    ap.add_argument("--tap", nargs=2, type=int, metavar=("STRING", "FRET"))
+    ap.add_argument("--seq", nargs="+", metavar="S,F", help="keys to tap, e.g. 1,1 2,1 3,2")
+    ap.add_argument("--gap", type=float, default=0.3, help="seconds between --seq taps")
     ap.add_argument("--hold", nargs=2, type=int, metavar=("STRING", "FRET"))
     ap.add_argument("--release", action="store_true")
     ap.add_argument("--rest", action="store_true")
@@ -230,6 +307,12 @@ if __name__ == "__main__":
     for w in arm.warnings:
         print("WARN:", w)
     try:
+        if a.tap:
+            print(arm.tap_key(a.tap[0], a.tap[1]))
+        if a.seq:
+            keys = [tuple(int(x) for x in k.split(",")) for k in a.seq]
+            for r in arm.tap_sequence(keys, a.gap):
+                print(r)
         if a.hold:
             print(arm.hold_fret(a.hold[0], a.hold[1]))
         if a.release:

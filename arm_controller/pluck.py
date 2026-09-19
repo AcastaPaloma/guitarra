@@ -1,4 +1,12 @@
-"""Plucking tools for the picking arm — the tool layer a model backend
+"""RETIRED (2026-09-19): the pluck arm (IDs 5,6,1,2,7,3) is OUT OF SERVICE.
+
+The rig is single-arm now — fret.py (tap tools, IDs 7-12) is the complete
+tool surface. Do NOT wire these TOOLS into any backend. File kept for the
+recorded pose data in keyframes.json and for when/if the arm is repaired;
+PluckArm refuses to construct until ARM_IN_SERVICE is flipped back.
+
+--- original docstring ---
+Plucking tools for the picking arm — the tool layer a model backend
 (e.g. the Baseten-hosted brain) will call. No backend wiring lives here.
 
 String convention: 1 = RIGHTMOST string, 6 = LEFTMOST string (operator-defined).
@@ -30,6 +38,8 @@ from pathlib import Path
 from app import FeetechBus, PORT, BAUD, TORQUE_LIMIT_OVERRIDE
 
 KEYFRAMES_PATH = Path(__file__).parent / "keyframes.json"
+
+ARM_IN_SERVICE = False  # pluck arm dead as of 2026-09-19 — see module docstring
 
 # Standard tuning, and the operator's right-to-left numbering matches guitar
 # convention: string 1 = high E (thinnest) ... string 6 = low E (thickest).
@@ -77,6 +87,9 @@ def load_strings(path=KEYFRAMES_PATH):
 
 class PluckArm:
     def __init__(self, port=PORT, baud=BAUD):
+        if not ARM_IN_SERVICE:
+            raise RuntimeError("pluck arm is OUT OF SERVICE — the rig is "
+                               "single-arm (fret.py tap tools). See docstring.")
         self.bus = FeetechBus(port, baud)
         self.strings, self.neutral = load_strings()
         alive = [sid for sid in [5, 6, 1, 2, 7, 3] if self.bus.ping(sid)]

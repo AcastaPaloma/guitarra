@@ -1,7 +1,13 @@
-# Fretting tools — v2 grid mapping and safety contract
+# Tapping/fretting tools — v2 grid mapping and safety contract
 
-`fret.py` is the tool layer for the fretting arm (IDs 7–11 + gripper 12 on
-`FRET_PORT` — the port re-enumerates on replug, check `ls /dev/cu.usbmodem*`).
+**SINGLE-ARM RIG (2026-09-19): the pluck arm is out of service.** `fret.py`
+is the COMPLETE tool surface for the whole rig — the arm sounds notes by
+tapping the recorded keys (fast press, brief dwell, lift). `pluck.py` is
+retired; do not wire its tools anywhere.
+
+`fret.py` drives the working arm (IDs 7–11 + gripper 12 on `FRET_PORT`,
+currently `/dev/cu.wchusbserial5B8E1128501` — the port re-enumerates on
+replug, check `ls /dev/cu.*`).
 Backend-agnostic: `TOOLS` holds the schemas, `dispatch()` is the entry point,
 no Baseten wiring yet by design.
 
@@ -58,11 +64,11 @@ Keep long holds bounded and watch temps (reg 63) during long passages.
 
 ## Tools
 
-- `hold_fret(string, fret)` — press and HOLD until released/re-targeted.
-- `release_fret()` — back to rest, string rings open.
+- `tap_key(string, fret)` — fast press to SOUND the note, dwell, lift. The
+  only sound-making primitive on the rig now.
+- `tap_sequence(keys, gap_s)` — tap several `[string, fret]` keys in order.
+- `hold_fret(string, fret)` — quiet press and HOLD until released/re-targeted.
+- `release_fret()` — back to rest.
 - `get_fret_position(string, fret)` — exact raw targets + recorded cell list,
   no motion, works without hardware.
 - `fret_rest()` — park.
-
-Coordination (hold before pluck, release after decay) belongs in the backend
-loop, not here.

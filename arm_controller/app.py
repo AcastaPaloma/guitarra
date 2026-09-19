@@ -1,7 +1,11 @@
-"""Quick arm controller for the fretting arm on the Waveshare bus servo adapter.
+"""Quick arm controller GUI on the Waveshare bus servo adapter.
 
 Talks raw Feetech STS protocol over serial (no lerobot dependency).
-Bottom-to-top joint order on this arm: 5, 6, 1, 2, 7, 3.
+
+Defaults target the ONLY working arm (the tapping/fretting arm, IDs 7-12).
+The old pluck arm (5, 6, 1, 2, 7, 3) is out of service — use --port/--ids to
+override if it ever comes back. Gripper 12 is deliberately absent from the
+defaults: it permanently holds the fingertip tool and is never commanded.
 
 Run:  uv run --with pyserial python app.py
 """
@@ -15,11 +19,11 @@ from tkinter import messagebox, simpledialog, ttk
 
 import serial
 
-PORT = "/dev/cu.usbmodem5B8E1128501"
+PORT = "/dev/cu.wchusbserial5B8E1128501"
 BAUD = 1_000_000
-MOTOR_IDS = [5, 6, 1, 2, 7, 3]  # bottom of the arm to top
-JOINT_NAMES = {5: "base", 6: "shoulder", 1: "elbow", 2: "wrist_flex", 7: "wrist_roll", 3: "gripper"}
-KEYFRAMES_PATH = Path(__file__).parent / "keyframes.json"
+MOTOR_IDS = [7, 8, 9, 10, 11]  # bottom of the arm to top; gripper 12 never commanded
+JOINT_NAMES = {7: "base", 8: "shoulder", 9: "elbow", 10: "wrist_flex", 11: "wrist_roll"}
+KEYFRAMES_PATH = Path(__file__).parent / "keyframes_arm2.json"
 
 # STS3215 register addresses
 REG_TORQUE_ENABLE = 40
@@ -27,13 +31,12 @@ REG_GOAL_BLOCK = 41  # acc(1) goal_pos(2) goal_time(2) goal_speed(2)
 REG_TORQUE_LIMIT = 48  # runtime limit, re-clamped to EEPROM max on every torque enable
 REG_PRESENT_POS = 56
 
-# ID 1's EEPROM max-torque is 250 (25%) — too weak to move the elbow, so it plays
-# dead after every torque cycle. Restore full runtime torque each enable instead of
-# editing EEPROM. Gripper (3) keeps its 50% grip-protection limit on purpose.
-TORQUE_LIMIT_OVERRIDE = {1: 1000}
+# Arm-1 quirks (elbow 1's weak EEPROM torque, elbow range cap) no longer apply —
+# that arm is out of service. Kept as empty maps so per-motor overrides are easy
+# to add back for THIS arm if a joint needs one.
+TORQUE_LIMIT_OVERRIDE = {}
 
-# Per-motor position range; elbow (1) capped at 4000 per operator request.
-MOTOR_RANGE = {1: (0, 4000)}
+MOTOR_RANGE = {}
 DEFAULT_RANGE = (0, 4095)
 
 GOTO_ACC = 30
