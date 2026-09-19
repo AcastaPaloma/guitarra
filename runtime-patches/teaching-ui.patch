@@ -46,7 +46,7 @@ index ad7e364..b7f4a62 100644
          </main>
        </div>
 diff --git a/apps/dashboard/frontend/src/api/dashboardClient.ts b/apps/dashboard/frontend/src/api/dashboardClient.ts
-index b786382..2e5a28a 100644
+index b786382..726d88c 100644
 --- a/apps/dashboard/frontend/src/api/dashboardClient.ts
 +++ b/apps/dashboard/frontend/src/api/dashboardClient.ts
 @@ -1,4 +1,5 @@
@@ -87,7 +87,7 @@ index b786382..2e5a28a 100644
    stopAnimation: () => postJson('/api/animations/stop'),
    deleteAnimation: (name: string) => postJson('/api/animations/delete', { name }),
    setIdleAnimation: (name: string | null) => postJson('/api/animations/idle', { name }),
-@@ -205,6 +215,16 @@ export const dashboardApi = {
+@@ -205,6 +215,17 @@ export const dashboardApi = {
    getRecordingStatus: () => fetchJson<RecordingStatus>('/api/recording/status'),
    startRecording: (name: string) => postJson<RecordingStatus>('/api/recording/start', { name }),
    stopRecording: () => postJson<RecordingStopResponse>('/api/recording/stop'),
@@ -96,8 +96,9 @@ index b786382..2e5a28a 100644
 +  getDanceCatalog: () => fetchJson<DanceCatalog>('/api/dances'),
 +  getDanceStatus: () => fetchJson<DanceStatus>('/api/dances/status'),
 +  prepareDance: (song_id: string, bpm: number, variation: number, beats?: number[]) => postJson<PreparedDance>('/api/animations/play', { dance: { operation: 'prepare', song_id, bpm, variation, ...(beats ? { beats } : {}) } }),
-+  startDance: (id: string) => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'start', id } }),
++  startDance: (id: string, audio_mode: 'laptop_beat' | 'laptop_file' = 'laptop_beat') => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'start', id, audio_mode } }),
 +  danceHeartbeat: (id: string) => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'heartbeat', id } }),
++  confirmDanceAudio: (id: string, start_at: number) => postJson<DanceStatus>('/api/animations/play', { dance: { operation: 'audio_ready', id, start_at } }),
 +  getTeachingNeutral: () => fetchJson<TeachingNeutral>('/api/recording/neutral'),
 +  saveTeachingNeutral: () => postJson<TeachingNeutral>('/api/recording/stop', { operation: 'save_neutral', restore_torque: false }),
 +  goToTeachingNeutral: () => postJson('/api/animations/play', { name: 'teaching_neutral', teaching: true }),
@@ -153,7 +154,7 @@ index ceaabd9..d005474 100644
  }
 diff --git a/apps/dashboard/frontend/src/api/types/dancing.ts b/apps/dashboard/frontend/src/api/types/dancing.ts
 new file mode 100644
-index 0000000..a9e0fe8
+index 0000000..08ba0c3
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/api/types/dancing.ts
 @@ -0,0 +1,17 @@
@@ -171,8 +172,8 @@ index 0000000..a9e0fe8
 +  frames: number; neutral_hold_seconds: number; preview: Array<{ t: number; positions: Record<string, number> }>;
 +}
 +export interface PreparedDance { id: string; expires_in: number; report: DanceReport }
-+export interface DanceStatus { version: number; server_time: number; id?: string | null; song_id?: string | null; state?: string | null; start_at?: number | null; error?: string | null }
-+export interface DanceCatalog { version: number; songs: DanceSong[]; neutral_valid: boolean; error?: string;
++export interface DanceStatus { version: number; server_time: number; id?: string | null; song_id?: string | null; state?: string | null; start_at?: number | null; ended_at?: number | null; error?: string | null; audio_ready?: boolean; audio_mode?: string; safety_latched?: boolean }
++export interface DanceCatalog { version: number; songs: DanceSong[]; neutral_valid: boolean; error?: string; safety_latched?: boolean;
 +  actions: Array<{ name: string; role: string; max_speed: number; window: number[] }>; }
 diff --git a/apps/dashboard/frontend/src/api/types/index.ts b/apps/dashboard/frontend/src/api/types/index.ts
 index 870421a..3dc486d 100644
@@ -348,10 +349,10 @@ index 5451e30..b05b6ff 100644
  
 diff --git a/apps/dashboard/frontend/src/utils/danceAudio.ts b/apps/dashboard/frontend/src/utils/danceAudio.ts
 new file mode 100644
-index 0000000..fe0279b
+index 0000000..dd12f49
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/utils/danceAudio.ts
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,141 @@
 +/** Local-only audio analysis. No audio data or file is sent to the lamp. */
 +export interface BeatAnalysis { bpm: number; beats: number[]; firstBeat: number; confidence: number }
 +
@@ -413,10 +414,30 @@ index 0000000..fe0279b
 +  private context: AudioContext | null = null;
 +  private nodes: AudioScheduledSourceNode[] = [];
 +  private bus: GainNode | null = null;
++  private volume = .6;
++  private playbackId = 0;
++
++  get isRunning() { return this.context?.state === 'running'; }
++
++  setVolume(volume: number) {
++    if (!Number.isFinite(volume) || volume < 0 || volume > 1) throw new Error('Audio volume must be between 0 and 100%');
++    this.volume = volume;
++    if (this.bus) this.bus.gain.value = volume;
++  }
 +
 +  async unlock() {
-+    if (!this.context || this.context.state === 'closed') this.context = new AudioContext();
-+    await this.context.resume();
++    if (!this.context || this.context.state === 'closed') {
++      const Context = globalThis.AudioContext || (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
++      if (!Context) throw new Error('This browser does not support audio playback. Use a browser with Web Audio enabled.');
++      this.context = new Context();
++    }
++    let timer: ReturnType<typeof setTimeout> | undefined;
++    try {
++      await Promise.race([this.context.resume(), new Promise<never>((_, reject) => {
++        timer = setTimeout(() => reject(new Error('Browser audio is blocked. Enable sound for this page and use Test laptop audio.')), 2500);
++      })]);
++    } finally { clearTimeout(timer); }
++    if (!this.isRunning) throw new Error('Browser audio is blocked. Enable sound for this page and use Test laptop audio.');
 +  }
 +
 +  async decode(file: File) {
@@ -427,15 +448,16 @@ index 0000000..fe0279b
 +    return buffer;
 +  }
 +
-+  schedule(delay: number, beats: number[], meter: number, buffer?: AudioBuffer, offset = 0) {
++  schedule(delay: number, beats: number[], meter: number, buffer?: AudioBuffer, offset = 0, onEnded?: () => void) {
 +    if (!this.context || this.context.state !== 'running') throw new Error('Audio is suspended. Start again to unlock it.');
-+    if (delay < .1) throw new Error('Missed the synchronized start; try again');
++    if (!Number.isFinite(delay) || delay < .1) throw new Error('Missed the synchronized start; try again');
 +    if (buffer && (!Number.isFinite(offset) || offset < 0 || offset + 30 > buffer.duration + .001)) throw new Error('Select a full 30-second excerpt');
 +    this.stop();
++    const playbackId = this.playbackId;
 +    const ctx = this.context;
 +    const when = ctx.currentTime + delay;
 +    this.bus = ctx.createGain();
-+    this.bus.gain.value = .45;
++    this.bus.gain.value = this.volume;
 +    this.bus.connect(ctx.destination);
 +    if (buffer) {
 +      const source = ctx.createBufferSource();
@@ -457,9 +479,14 @@ index 0000000..fe0279b
 +        this.nodes.push(oscillator);
 +      }
 +    }
++    const last = this.nodes[this.nodes.length - 1];
++    if (last) last.onended = () => {
++      if (this.playbackId === playbackId) onEnded?.();
++    };
 +  }
 +
 +  stop() {
++    this.playbackId++;
 +    for (const node of this.nodes) { try { node.stop(); node.disconnect(); } catch { /* already ended */ } }
 +    this.nodes = [];
 +    this.bus?.disconnect(); this.bus = null;
@@ -492,10 +519,10 @@ index 0000000..99eaa89
 +}
 diff --git a/apps/dashboard/frontend/src/views/DancingView.tsx b/apps/dashboard/frontend/src/views/DancingView.tsx
 new file mode 100644
-index 0000000..ff4649f
+index 0000000..208ec9f
 --- /dev/null
 +++ b/apps/dashboard/frontend/src/views/DancingView.tsx
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,335 @@
 +import { useCallback, useEffect, useRef, useState } from 'react';
 +import { AudioLines, Check, Disc3, FileAudio, Music2, Play, RefreshCw, Shuffle, Square } from 'lucide-react';
 +import { dashboardApi, errorMessage, ApiError } from '../api/dashboardClient';
@@ -504,7 +531,7 @@ index 0000000..ff4649f
 +import { useInterval } from '../hooks/useInterval';
 +import presets from '../../../../../static/dances/catalog.json';
 +
-+const ACTIVE = ['preparing', 'to_neutral', 'countdown', 'playing'];
++const ACTIVE = ['preparing', 'to_neutral', 'countdown', 'playing', 'finishing', 'stopping'];
 +const AXES = [['base_yaw', 'Turn', '#f5b455'], ['base_pitch', 'Lean', '#88bbf2'], ['elbow_pitch', 'Lift', '#bd8bff'], ['wrist_roll', 'Roll', '#78dfca'], ['wrist_pitch', 'Nod', '#f18b86']];
 +type AttachedAudio = { buffer: AudioBuffer; name: string };
 +
@@ -524,6 +551,9 @@ index 0000000..ff4649f
 +  const [now, setNow] = useState(Date.now());
 +  const [attachment, setAttachment] = useState<AttachedAudio | null>(null);
 +  const [hearing, setHearing] = useState(false);
++  const [volume, setVolume] = useState(60);
++  const [audioStatus, setAudioStatus] = useState('Audio output: this laptop');
++  const [speakerStatus, setSpeakerStatus] = useState('Checking lamp speaker…');
 +  const engine = useRef<DanceAudio | null>(null);
 +  const buffers = useRef(new Map<string, AttachedAudio>());
 +  const ownedRun = useRef<string | null>(null);
@@ -536,23 +566,31 @@ index 0000000..ff4649f
 +  const generation = useRef(0);
 +  const working = useRef(false);
 +  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const lastRunError = useRef('');
 +  const songs: DanceSong[] = catalog?.songs || presets;
 +  const song = songs.find(s => s.id === songId) || songs[0];
 +  const active = Boolean(status?.state && ACTIVE.includes(status.state));
-+  const ready = programRunning && !needsUpdate && catalog?.version === 1 && catalog.neutral_valid;
++  const safetyLatched = status?.safety_latched ?? catalog?.safety_latched ?? false;
++  const ready = programRunning && !needsUpdate && catalog?.version === 2 && catalog.neutral_valid && !safetyLatched;
 +
 +  const audio = () => engine.current || (engine.current = new DanceAudio());
 +  const stopSound = () => {
 +    engine.current?.stop();
 +    if (previewTimer.current) clearTimeout(previewTimer.current);
 +    setHearing(false);
++    setAudioStatus('Audio stopped · output: this laptop');
 +  };
 +  const stop = async () => {
 +    stopSound();
++    const stoppingId = ownedRun.current || status?.id;
 +    if (ownedRun.current) setPrepared(null);
 +    ownedRun.current = null;
 +    scheduled.current = null;
-+    try { await dashboardApi.stopAnimation(); }
++    setStatus(current => current && stoppingId && current.id === stoppingId ? { ...current, state: 'stopping' } : current);
++    try {
++      await dashboardApi.stopAnimation();
++      if (mounted.current) setStatus(current => current && stoppingId && current.id === stoppingId ? { ...current, state: 'stopped' } : current);
++    }
 +    catch (failure) { setError(`Stop request failed: ${errorMessage(failure)}. Connection loss also stops this dance's motor commands within 4 seconds.`); }
 +  };
 +
@@ -560,7 +598,7 @@ index 0000000..ff4649f
 +    try {
 +      const result = await dashboardApi.getDanceCatalog();
 +      if (mounted.current) {
-+        if (result.version !== 1) { setCatalog(null); setNeedsUpdate(true); return; }
++        if (result.version !== 2) { setCatalog(null); setNeedsUpdate(true); return; }
 +        setCatalog(result); setNeedsUpdate(false); setError('');
 +      }
 +    } catch (failure) {
@@ -589,7 +627,9 @@ index 0000000..ff4649f
 +        clockOffset.current = result.server_time * 1000 - (sent + received) / 2;
 +      }
 +      setStatus(result);
-+      if (result.error) setError(result.error);
++      if (result.error && lastRunError.current !== `${result.id}:${result.error}`) {
++        lastRunError.current = `${result.id}:${result.error}`; setError(result.error);
++      }
 +      if (pollingOwner && result.id !== pollingOwner) {
 +        ownedRun.current = null;
 +        scheduled.current = null;
@@ -600,9 +640,20 @@ index 0000000..ff4649f
 +        const selected = playback.current;
 +        if (!selected) throw new Error('Playback preview is unavailable');
 +        if (rtt > 700) throw new Error('Connection is too slow for a synchronized start');
++        audio().setVolume(volume / 100);
 +        audio().schedule((result.start_at * 1000 - Date.now() - clockOffset.current) / 1000,
-+          selected.report.beats, selected.report.meter, selected.audio?.buffer, selected.offset);
++          selected.report.beats, selected.report.meter, selected.audio?.buffer, selected.offset,
++          () => { if (mounted.current) setAudioStatus('Audio excerpt finished · output: this laptop'); });
++        await dashboardApi.confirmDanceAudio(pollingOwner, result.start_at);
++        if (ownedRun.current !== pollingOwner) { stopSound(); return; }
 +        scheduled.current = result.id;
++        setAudioStatus(`${selected.audio ? 'Song excerpt' : 'Beat track'} scheduled on this laptop`);
++      }
++      if (pollingOwner && result.id === pollingOwner && ['playing', 'finishing'].includes(result.state || '')) {
++        if (result.state === 'playing' && !audio().isRunning) throw new Error('Browser audio stopped. Dance cancelled; enable sound before retrying.');
++        if (result.start_at && Date.now() + clockOffset.current > (result.start_at + 35) * 1000) {
++          throw new Error('Dance completion was not confirmed. Playback stopped; prepare again.');
++        }
 +      }
 +      // null === null means "nothing has played yet", not "our run ended".
 +      // Only a real owned playback may consume its prepared preview.
@@ -633,6 +684,16 @@ index 0000000..ff4649f
 +    };
 +  }, [refreshCatalog]);
 +  useEffect(() => { if (programRunning) void refreshCatalog(); }, [programRunning, refreshCatalog]);
++  const checkSpeaker = async () => {
++    try {
++      const result = await dashboardApi.getAudioOutputDevices();
++      const real = result.devices?.find(d => d.selected && d.connected && !/dummy|auto_null/i.test(`${d.id} ${d.name}`));
++      if (mounted.current) setSpeakerStatus(real
++        ? `Lamp output detected: ${real.name}. This dance tab currently plays audio on your laptop.`
++        : 'No lamp speaker detected (Dummy Output). Sound plays on your laptop, not the lamp.');
++    } catch { if (mounted.current) setSpeakerStatus('Lamp speaker status unavailable. Sound output is this laptop.'); }
++  };
++  useEffect(() => { void checkSpeaker(); }, []);
 +  // Starting a process does not mean its HTTP routes are ready. Keep checking
 +  // passively after a restart; never restart or command motors from polling.
 +  useInterval(refreshCatalog, programRunning && !busy && (!catalog || needsUpdate) ? 2000 : null);
@@ -665,6 +726,7 @@ index 0000000..ff4649f
 +  const start = () => run('Starting dance', async () => {
 +    if (!prepared || !ready) throw new Error('Prepare a dance and save neutral first');
 +    await audio().unlock();
++    if (volume <= 0) throw new Error('Turn up laptop audio before starting the dance');
 +    if (!mounted.current) return;
 +    stopSound();
 +    playback.current = { report: prepared.report, audio: attachment, offset };
@@ -673,7 +735,7 @@ index 0000000..ff4649f
 +    try {
 +      await dashboardApi.setIdleAnimation(null);
 +      if (!mounted.current || ownedRun.current !== prepared.id) return;
-+      const result = await dashboardApi.startDance(prepared.id);
++      const result = await dashboardApi.startDance(prepared.id, attachment ? 'laptop_file' : 'laptop_beat');
 +      setStatus(result);
 +    } catch (failure) { await stop(); throw failure; }
 +    finally { startingRun.current = false; }
@@ -701,8 +763,16 @@ index 0000000..ff4649f
 +    if (hearing) { stopSound(); return; }
 +    if (!prepared) throw new Error('Prepare the dance first');
 +    await audio().unlock();
++    audio().setVolume(volume / 100);
 +    audio().schedule(.2, prepared.report.beats, song.meter, attachment?.buffer, offset);
++    setAudioStatus(`${attachment ? 'Song excerpt' : 'Beat track'} preview on this laptop`);
 +    setHearing(true); previewTimer.current = setTimeout(stopSound, 30300);
++  });
++  const testAudio = () => run('Testing audio', async () => {
++    stopSound(); await audio().unlock(); audio().setVolume(volume / 100);
++    audio().schedule(.15, [0, .3, .6], 4);
++    setAudioStatus('Three test tones on this laptop · no motor movement');
++    previewTimer.current = setTimeout(stopSound, 1100);
 +  });
 +  const loadUpdate = () => {
 +    if (!window.confirm('Support the lamp’s head and arms. Restarting can release motor power. Factory idle remains disabled. Ready to load the dance update?')) return;
@@ -723,11 +793,15 @@ index 0000000..ff4649f
 +  const currentCue = report?.cues.find(cue => cue.start <= elapsed && cue.end > elapsed);
 +  const locked = active || Boolean(busy);
 +  const stateLabel = status?.state === 'to_neutral' ? 'Going to neutral' : status?.state === 'countdown' ? `Starting in ${countdown.toFixed(1)}s`
-+    : status?.state === 'playing' ? 'Dancing' : status?.state === 'preparing' ? 'Checking entry' : prepared ? 'Ready to dance' : status?.state === 'completed' ? 'Back at neutral' : 'Stage is yours';
++    : status?.state === 'playing' ? 'Dancing' : status?.state === 'preparing' ? 'Checking entry'
++    : status?.state === 'finishing' ? 'Checking final neutral' : status?.state === 'stopping' ? 'Stopping'
++    : prepared ? 'Ready to dance' : status?.state === 'completed' ? 'Complete · back at neutral'
++    : status?.state === 'failed' ? 'Dance failed' : status?.state === 'stopped' ? 'Stopped' : 'Stage is yours';
 +
 +  return <div className="dance-view" style={{ '--dance-accent': song.color } as React.CSSProperties}>
 +    <header className="dance-heading"><div><span className="dance-eyebrow">THE LAMP SESSIONS · VOL. 01</span><h1>Small lamp. Big moves.</h1><p>Five songs. Your moves. A different groove every time.</p></div><span className={`dance-live ${active ? 'active' : ''}`}><span />{stateLabel}</span></header>
-+    {(needsUpdate || !programRunning) && <div className="teaching-notice">The Dance backend needs a one-time robot restart. Support the head and arms first.<button className="btn" disabled={Boolean(busy)} onClick={loadUpdate}>Load dance update</button></div>}
++    {(needsUpdate || !programRunning) && <div className="teaching-notice">Load the dance reliability update before playback. Support the head and arms first; restarting can release motor holding.<button className="btn" disabled={Boolean(busy)} onClick={loadUpdate}>Load dance update</button></div>}
++    {safetyLatched && <div className="teaching-error" role="alert">Emergency stop is latched. Motor power stays off. Inspect and support the lamp, then clear the stop explicitly in Controls before dancing.</div>}
 +    {catalog && !catalog.neutral_valid && <div className="teaching-notice">Save a neutral standing pose in Teach before dancing.<button className="btn" disabled={locked} onClick={() => void refreshCatalog()}><RefreshCw size={15} />Check again</button></div>}
 +    {(error || catalog?.error) && <div className="teaching-error" role="alert">{error || catalog?.error}</div>}
 +    <div className="dance-layout">
@@ -747,10 +821,15 @@ index 0000000..ff4649f
 +          <label>Excerpt start <span className="dance-number"><input aria-label="Excerpt start seconds" type="number" min={0} step={.1} value={Number(offset.toFixed(3))} disabled={locked || !attachment} onChange={e => { invalidate(); setOffset(Number(e.target.value)); setBeats(undefined); }} /><small>SEC</small></span></label>
 +          <div className="dance-meter"><span>Phrase</span><strong>{song.meter}/4</strong><small>{song.meter === 5 ? 'Three + two' : 'Four on the floor'}</small></div>
 +        </div>
-+        <div className="dance-audio"><div><FileAudio size={18} /><span><strong>{attachment ? attachment.name : 'Built-in beat track'}</strong><small>{attachment ? 'Audio stays on this laptop. Never uploaded.' : 'A metronome, not the original song recording.'}</small></span></div>
++        <div className="dance-audio"><div><FileAudio size={18} /><span><strong>{attachment ? attachment.name : 'No song file attached · beat track only'}</strong><small>{attachment ? 'Audio stays on this laptop. Never uploaded.' : 'Attach audio to hear the actual song. The preset supplies choreography and a metronome.'}</small></span></div>
 +          <label className={`btn ${locked ? 'disabled' : ''}`}>Attach audio<input aria-label="Attach local song audio" type="file" accept="audio/*" disabled={locked} onChange={e => { const file = e.target.files?.[0]; if (file) void attach(file); e.target.value = ''; }} /></label>
 +          <button className="btn ghost" disabled={locked || !attachment} onClick={() => void analyze()}>Analyze beats</button>
 +          {attachment && <button className="btn ghost" disabled={locked} onClick={() => { invalidate(); buffers.current.delete(songId); setAttachment(null); setOffset(0); setBeats(undefined); setAnalysis('Manual tempo grid'); }}>Use beats</button>}
++        </div>
++        <div className="dance-audio"><div><Music2 size={18} /><span><strong>{audioStatus}</strong><small>{speakerStatus}</small></span></div>
++          <button className="btn" disabled={locked} onClick={() => void testAudio()}>Test laptop audio</button>
++          <label>Laptop volume <input aria-label="Laptop audio volume" type="range" min={0} max={100} value={volume} onChange={e => { const value = Number(e.target.value); setVolume(value); audio().setVolume(value / 100); }} />{volume}%</label>
++          <button className="btn ghost" disabled={locked} onClick={() => void checkSpeaker()}>Check lamp speaker</button>
 +        </div>
 +        <p className="dance-analysis">{analysis}. <a href={song.source} target="_blank" rel="noreferrer">Tempo reference ↗</a></p>
 +        <div className="dance-score">
@@ -1026,10 +1105,10 @@ index 0000000..47f726f
 +}
 diff --git a/apps/dashboard/frontend/tests/dancing.test.mjs b/apps/dashboard/frontend/tests/dancing.test.mjs
 new file mode 100644
-index 0000000..cae5d9c
+index 0000000..a5b360c
 --- /dev/null
 +++ b/apps/dashboard/frontend/tests/dancing.test.mjs
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,113 @@
 +import test from 'node:test';
 +import assert from 'node:assert/strict';
 +import { analyzeBeats, DanceAudio } from '../src/utils/danceAudio.ts';
@@ -1075,10 +1154,13 @@ index 0000000..cae5d9c
 +  await dashboardApi.prepareDance('waterloo', 148, 2, [0, .4, .8]);
 +  await dashboardApi.startDance('dance_test');
 +  await dashboardApi.danceHeartbeat('dance_test');
++  await dashboardApi.confirmDanceAudio('dance_test', 1234.5);
 +  const mutations = requests.filter(r => r.path === '/api/animations/play');
-+  assert.deepEqual(mutations.map(r => JSON.parse(r.init.body).dance.operation), ['prepare', 'start', 'heartbeat']);
++  assert.deepEqual(mutations.map(r => JSON.parse(r.init.body).dance.operation), ['prepare', 'start', 'heartbeat', 'audio_ready']);
 +  assert.ok(mutations.every(r => r.init.headers['X-LeLamp-CSRF'] === 'test'));
 +  assert.deepEqual(JSON.parse(mutations[0].init.body).dance.beats, [0, .4, .8]);
++  assert.equal(JSON.parse(mutations[1].init.body).dance.audio_mode, 'laptop_beat');
++  assert.equal(JSON.parse(mutations[3].init.body).dance.start_at, 1234.5);
 +});
 +
 +test('audio requires an unlocked context and refuses late synchronized starts', async () => {
@@ -1091,7 +1173,53 @@ index 0000000..cae5d9c
 +  };
 +  await engine.unlock();
 +  assert.throws(() => engine.schedule(0, [0], 4), /Missed/);
++  assert.throws(() => engine.schedule(NaN, [0], 4), /Missed/);
 +  assert.throws(() => engine.schedule(1, [0], 4, { duration: 31 }, 2), /30-second excerpt/);
++  engine.close();
++});
++
++test('song excerpt reaches the output with volume, exact offset and duration; Stop invalidates old callbacks', async () => {
++  const sources = [], gains = [], destination = {};
++  globalThis.AudioContext = class {
++    state = 'running'; currentTime = 10; destination = destination;
++    async resume() {} async close() {}
++    createGain() {
++      const gain = { gain: { value: 0 }, connect(to) { this.output = to; }, disconnect() {} };
++      gains.push(gain); return gain;
++    }
++    createBufferSource() {
++      const source = { connect(to) { this.output = to; }, disconnect() {},
++        start(...args) { this.startArgs = args; }, stop() { this.stopped = true; } };
++      sources.push(source); return source;
++    }
++  };
++  const engine = new DanceAudio(), buffer = { duration: 90 };
++  let ended = 0;
++  await engine.unlock(); engine.setVolume(.6);
++  engine.schedule(2, [0], 4, buffer, 12, () => ended++);
++  assert.equal(engine.isRunning, true);
++  assert.deepEqual(sources[0].startArgs, [12, 12, 30]);
++  assert.equal(sources[0].buffer, buffer);
++  assert.equal(sources[0].output, gains[0]);
++  assert.equal(gains[0].output, destination);
++  assert.equal(gains[0].gain.value, .6);
++  engine.setVolume(.25); assert.equal(gains[0].gain.value, .25);
++  engine.stop(); sources[0].onended();
++  assert.equal(sources[0].stopped, true);
++  assert.equal(ended, 0, 'Stop must invalidate the previous audio callback');
++  engine.schedule(2, [0], 4, buffer, 0, () => ended++);
++  sources[0].onended(); assert.equal(ended, 0);
++  sources[1].onended(); assert.equal(ended, 1);
++  assert.throws(() => engine.setVolume(NaN), /volume/);
++  assert.throws(() => engine.setVolume(2), /volume/);
++  engine.close();
++});
++
++test('a browser that remains suspended fails visibly instead of pretending audio is ready', async () => {
++  globalThis.AudioContext = class { state = 'suspended'; async resume() {} async close() {} };
++  const engine = new DanceAudio();
++  await assert.rejects(engine.unlock(), /Browser audio is blocked/);
++  assert.equal(engine.isRunning, false);
 +  engine.close();
 +});
 diff --git a/apps/dashboard/frontend/tests/teaching.test.mjs b/apps/dashboard/frontend/tests/teaching.test.mjs
@@ -1137,7 +1265,7 @@ index 0000000..dcb5edf
 +  assert.deepEqual(JSON.parse(go.init.body), { name: 'teaching_neutral', teaching: true });
 +});
 diff --git a/apps/robot_runtime/web/legacy_routes/animations.py b/apps/robot_runtime/web/legacy_routes/animations.py
-index 937de23..982778d 100644
+index 937de23..fec6326 100644
 --- a/apps/robot_runtime/web/legacy_routes/animations.py
 +++ b/apps/robot_runtime/web/legacy_routes/animations.py
 @@ -3,6 +3,7 @@
@@ -1157,7 +1285,7 @@ index 937de23..982778d 100644
 +        if isinstance(data, dict) and "dance" in data:
 +            from apps.robot_runtime.web.routes.dancing import dance_command
 +            return dance_command(self, data["dance"])
-+        if (getattr(self, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "countdown", "playing"}:
++        if (getattr(self, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}:
 +            return jsonify({"error": "Stop the dance before starting another animation"}), 409
 +        name = data.get("name") if isinstance(data, dict) else None
 +        if not isinstance(name, str) or not name:
@@ -1168,7 +1296,7 @@ index 937de23..982778d 100644
 +            return jsonify({"error": "Save the recording before replay"}), 409
 +        # Older controls must not bypass the neutral sequence for taught takes.
 +        teaching = data.get("teaching") is True or Path(name).stem.startswith("teach_") or name == "teaching_neutral"
-+        if getattr(self, "_teaching_playback", {}).get("state") in {"preparing", "playing"}:
++        if (getattr(self, "_teaching_playback", None) or {}).get("state") in {"preparing", "playing"}:
 +            return jsonify({"error": "Stop the current replay before starting another"}), 409
          try:
              animation_name = Path(name).stem
@@ -1272,7 +1400,7 @@ index 937de23..982778d 100644
              behavior_result = self._run_async(_play(), timeout=6)
              lifecycle = behavior_result.get("lifecycle") or {}
              if not lifecycle.get("ok"):
-@@ -122,11 +198,20 @@ def register_animation_routes(server) -> None:
+@@ -122,11 +198,21 @@ def register_animation_routes(server) -> None:
              "idle_paused": idle_paused,
              "idle_playing": idle_playing,
              "last_error": self._last_animation_error,
@@ -1285,20 +1413,26 @@ index 937de23..982778d 100644
      def stop_animation():
          previous = self._current_animation
 +        dance = getattr(self, "_dance_playback", None)
-+        if dance and dance.get("state") in {"preparing", "to_neutral", "countdown", "playing"}:
++        if dance and dance.get("state") in {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}:
 +            dance["cancelled"] = True
++            dance['state'] = 'stopping'
 +        cancel = getattr(self, "_teaching_cancel", None)
 +        if cancel:
 +            cancel.set()
          try:
              lifecycle = self._run_async(
                  self._request_behavior_stop_lifecycle(reason="dashboard_animation_stop"),
-@@ -143,6 +228,8 @@ def register_animation_routes(server) -> None:
+@@ -143,6 +229,13 @@ def register_animation_routes(server) -> None:
                  }), 409
              self._current_animation = None
              self._animation_started_at = None
++            if dance and dance.get('cancelled'):
++                dance['state'] = 'failed' if dance.get('error') else 'stopped'
++                dance['ended_at'] = time.time()
 +            if cancel:
-+                getattr(self, "_teaching_playback", {})["state"] = "stopped"
++                teaching_playback = getattr(self, "_teaching_playback", None)
++                if teaching_playback:
++                    teaching_playback["state"] = "stopped"
              return jsonify({
                  "status": "ok",
                  "stopped": previous,
@@ -1322,29 +1456,95 @@ index 222e69c..e54a51a 100644
      register_sdk_routes(server)
  
  
+diff --git a/apps/robot_runtime/web/routes/dance_lifecycle.py b/apps/robot_runtime/web/routes/dance_lifecycle.py
+new file mode 100644
+index 0000000..28ba825
+--- /dev/null
++++ b/apps/robot_runtime/web/routes/dance_lifecycle.py
+@@ -0,0 +1,58 @@
++"""Await a dance result without holding an event-bus subscriber open."""
++import asyncio
++import time
++
++from core.domain.behavior import BehaviorIntent
++MOTION_ACTION_RESULT = 'motion.action.result'
++
++TOTAL_TIMEOUT_SECONDS = 55.0
++
++
++async def execute_dance(server, run, check_cancelled):
++    """Admission is short; correlated completion runs outside the bus handler.
++
++    The bus has a 30 s per-subscriber timeout. A 30 s dance plus neutral entry
++    and count-in cannot be executed synchronously inside that subscriber.
++    """
++    bus = getattr(server, 'event_bus', None)
++    if not callable(getattr(bus, 'subscribe', None)) or not callable(getattr(bus, 'unsubscribe', None)):
++        raise RuntimeError('Dance completion tracking is unavailable')
++    action_id = run['id'] + '_execution'
++    result_future = asyncio.get_running_loop().create_future()
++
++    async def completed(event):
++        data = event.get('data') if isinstance(event.get('data'), dict) else event
++        if data.get('action_id') == action_id and not result_future.done():
++            result_future.set_result(data)
++
++    await bus.subscribe(MOTION_ACTION_RESULT, completed)
++    try:
++        check_cancelled()
++        intent = BehaviorIntent(
++            name='play_dance', source='web_api', category='direct_animation', priority=90,
++            suggested_motion=run['id'], ttl=TOTAL_TIMEOUT_SECONDS,
++            metadata={'action_id': action_id, 'explicit_animation': True, 'motion_action': True,
++                      'requester': 'dashboard', 'async_motion': True})
++        # This only acknowledges admission. It is never taken as completion.
++        async with asyncio.timeout(5):
++            admission = await server._request_behavior_intent_lifecycle(intent, action_id=action_id, timeout=4)
++        failure = server._event_failure_reason(admission.get('result'))
++        if not admission.get('ok') or failure:
++            raise RuntimeError(failure or admission.get('error') or 'Dance admission failed')
++        deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
++        while not result_future.done():
++            check_cancelled()
++            if time.monotonic() >= deadline:
++                raise TimeoutError('Dance completion timed out; playback was stopped')
++            await asyncio.wait({result_future}, timeout=.05)
++        result = result_future.result()
++        failure = server._event_failure_reason(result)
++        if failure:
++            if str(result.get('state', '')).upper() in {'CANCELED', 'CANCELLED', 'INTERRUPTED'}:
++                raise asyncio.CancelledError(run.get('error') or 'Dance interrupted')
++            raise RuntimeError(run.get('error') or failure)
++        if str(result.get('state', '')).upper() != 'SUCCEEDED':
++            raise RuntimeError('Dance ended without confirmed completion')
++        check_cancelled()
++    finally:
++        await bus.unsubscribe(MOTION_ACTION_RESULT, completed)
 diff --git a/apps/robot_runtime/web/routes/dancing.py b/apps/robot_runtime/web/routes/dancing.py
 new file mode 100644
-index 0000000..5ed418f
+index 0000000..dad0b31
 --- /dev/null
 +++ b/apps/robot_runtime/web/routes/dancing.py
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,157 @@
 +"""Dance catalog and two-step preview/start through authenticated motion routes."""
 +import asyncio
++import math
 +import threading
 +import time
-+import uuid
 +
 +from flask import jsonify
-+from core.domain.behavior import BehaviorIntent
 +from core.events.topics import MOTION_TORQUE_COMMAND, MOTION_TORQUE_RESULT
++from .dance_lifecycle import execute_dance
 +
-+ACTIVE_STATES = {"preparing", "to_neutral", "countdown", "playing"}
++ACTIVE_STATES = {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}
 +
 +
 +def public_status(server):
 +    run = getattr(server, "_dance_playback", None) or {}
-+    return {"version": 1, "server_time": time.time(),
-+            **{key: run.get(key) for key in ("id", "song_id", "state", "start_at", "error")}}
++    motion = server._motion_status() if callable(getattr(server, '_motion_status', None)) else {}
++    return {"version": 2, "server_time": time.time(),
++            "safety_latched": motion.get('is_safe') is False,
++            **{key: run.get(key) for key in ("id", "song_id", "state", "start_at", "ended_at", "error", "audio_ready", "audio_mode")}}
 +
 +
 +def register_dance_routes(server):
@@ -1369,20 +1569,28 @@ index 0000000..5ed418f
 +    if not isinstance(options, dict):
 +        return jsonify({"error": "Dance options must be an object"}), 400
 +    operation = options.get("operation")
-+    if operation not in {"prepare", "start", "heartbeat"}:
++    if operation not in {"prepare", "start", "heartbeat", "audio_ready"}:
 +        return jsonify({"error": "Unknown dance operation"}), 400
 +    with server._dance_lock:
 +        run = server._dance_playback
-+        if operation == "heartbeat":
++        if operation in {"heartbeat", "audio_ready"}:
 +            if not run or run["id"] != options.get("id") or run["state"] not in ACTIVE_STATES:
 +                return jsonify({"error": "No matching active dance"}), 409
++            if operation == 'audio_ready':
++                start_at = options.get('start_at')
++                if (run['state'] != 'countdown' or not isinstance(start_at, (int, float))
++                        or isinstance(start_at, bool) or not math.isfinite(start_at)
++                        or abs(start_at - (run.get('start_at') or 0)) > .001
++                        or start_at - time.time() < .05):
++                    return jsonify({'error': 'Audio missed the synchronized start; prepare and try again'}), 409
++                run['audio_ready'] = True
 +            run["heartbeat"] = time.monotonic()
 +            return jsonify(public_status(server))
 +        if not server.motion:
 +            return jsonify({"error": "Motion controller unavailable"}), 503
 +        if server._recording or server._recording_frames:
 +            return jsonify({"error": "Save the current take first"}), 409
-+        if (run and run["state"] in ACTIVE_STATES) or getattr(server, "_teaching_playback", {}).get("state") in {"preparing", "playing"}:
++        if (run and (run["state"] in ACTIVE_STATES or server._current_animation == run['id'])) or (getattr(server, "_teaching_playback", None) or {}).get("state") in {"preparing", "playing"}:
 +            return jsonify({"error": "Stop the current playback first"}), 409
 +        try:
 +            if operation == "prepare":
@@ -1392,12 +1600,18 @@ index 0000000..5ed418f
 +                raise ValueError("Prepare a dance first")
 +            record = server.motion._dance_record(identifier)
 +            status = server._motion_status()
++            if status.get('is_safe') is False:
++                raise ValueError('Emergency stop is latched. Inspect/support the lamp and clear it explicitly in Controls before dancing')
 +            if status.get("is_moving") or status.get("current_idle"):
 +                raise ValueError("Stop playback and clear idle before dancing")
 +            if type(status.get("torque_enabled")) is not bool:
 +                raise ValueError("Motor power state is unavailable")
++            audio_mode = options.get('audio_mode')
++            if audio_mode not in {'laptop_beat', 'laptop_file'}:
++                raise ValueError('Choose laptop audio and refresh the dashboard before starting')
 +            run = {"id": identifier, "song_id": record["report"]["song"]["id"], "state": "preparing",
-+                   "start_at": None, "error": None, "heartbeat": time.monotonic(), "cancelled": False}
++                   "start_at": None, "error": None, "heartbeat": time.monotonic(), "cancelled": False,
++                   'audio_mode': audio_mode, 'audio_ready': False}
 +            cancel = threading.Event()
 +            server._teaching_cancel = cancel
 +            server._dance_playback = run
@@ -1425,24 +1639,41 @@ index 0000000..5ed418f
 +                        if not torque.get("ok") or failure:
 +                            raise RuntimeError(failure or "Could not enable motor holding")
 +                    check_cancelled()
-+                    action_id = "dance_" + uuid.uuid4().hex[:12]
-+                    lifecycle = await server._request_behavior_intent_lifecycle(
-+                        BehaviorIntent(name="play_dance", source="web_api", category="direct_animation", priority=90,
-+                                       suggested_motion=identifier, ttl=70,
-+                                       metadata={"action_id": action_id, "explicit_animation": True,
-+                                                 "motion_action": True, "requester": "dashboard", "synchronous_motion": True}),
-+                        action_id=action_id, timeout=70)
-+                    failure = server._event_failure_reason(lifecycle.get("result"))
-+                    if not lifecycle.get("ok") or failure:
-+                        raise RuntimeError(failure or "Dance execution failed")
++                    await execute_dance(server, run, check_cancelled)
 +                    check_cancelled()
 +                    run["state"] = "completed"
 +                except asyncio.CancelledError:
 +                    run["state"] = "failed" if run["error"] else "stopped"
 +                except Exception as error:
-+                    run["state"] = "stopped" if cancel.is_set() else "failed"
-+                    run["error"] = str(error)
++                    run["state"] = "stopped" if cancel.is_set() and not run.get('error') else "failed"
++                    if not cancel.is_set():
++                        run["error"] = str(error) or 'Dance execution was interrupted'
 +                finally:
++                    # A missing lifecycle result must never leave motors running
++                    # or a stale "playing" state until the next user command.
++                    if run['state'] != 'completed':
++                        terminal_state = run['state']
++                        run['cancelled'] = True
++                        run['state'] = 'stopping'
++                        if server._current_animation == identifier:
++                            try:
++                                async with asyncio.timeout(4):
++                                    stopped = await server._request_behavior_stop_lifecycle(reason='dance_cleanup')
++                                failure = server._event_failure_reason(stopped.get('result'))
++                                if not stopped.get('ok') or failure:
++                                    raise RuntimeError(failure or stopped.get('error') or 'Stop acknowledgment missing')
++                            except Exception as error:
++                                run['error'] = '; '.join(filter(None, [run.get('error'), f'Dance stop acknowledgment failed: {error}']))
++                                terminal_state = 'failed'
++                                # Cancellation only: never enable power, home,
++                                # or clear the safety latch as a recovery step.
++                                try:
++                                    async with asyncio.timeout(2):
++                                        await server.motion.stop_all()
++                                except Exception as stop_error:
++                                    run['error'] += f'; Controller stop unconfirmed: {stop_error or type(stop_error).__name__}'
++                        run['state'] = terminal_state
++                    run['ended_at'] = time.time()
 +                    server.motion._dance_prepared.pop(identifier, None)
 +                    if server._current_animation == identifier:
 +                        server._current_animation = None
@@ -1453,7 +1684,7 @@ index 0000000..5ed418f
 +        except (ValueError, RuntimeError, OSError) as error:
 +            return jsonify({"error": str(error)}), 409
 diff --git a/apps/robot_runtime/web/routes/recording.py b/apps/robot_runtime/web/routes/recording.py
-index 658fccc..03d4fe4 100644
+index 658fccc..fca24ea 100644
 --- a/apps/robot_runtime/web/routes/recording.py
 +++ b/apps/robot_runtime/web/routes/recording.py
 @@ -3,25 +3,50 @@
@@ -1557,13 +1788,13 @@ index 658fccc..03d4fe4 100644
 +        # Use the existing authenticated mutation route; this operation never
 +        # starts/stops capture or changes motor power.
 +        if data.get("operation") == "save_neutral":
-+            if (getattr(server, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "countdown", "playing"}:
++            if (getattr(server, "_dance_playback", None) or {}).get("state") in {"preparing", "to_neutral", "countdown", "playing", "finishing", "stopping"}:
 +                return jsonify({"error": "Stop the dance before changing neutral"}), 409
 +            if data.get("restore_torque") is not False:
 +                return jsonify({"error": "Saving neutral must leave motor power unchanged"}), 400
 +            if server._recording or server._recording_frames or (server._recording_thread and server._recording_thread.is_alive()):
 +                return jsonify({"error": "Save the take before setting neutral"}), 409
-+            if getattr(server, "_teaching_playback", {}).get("state") in {"preparing", "playing"}:
++            if (getattr(server, "_teaching_playback", None) or {}).get("state") in {"preparing", "playing"}:
 +                return jsonify({"error": "Stop replay before setting neutral"}), 409
 +            if not server.motion:
 +                return jsonify({"error": "Servo controller not available"}), 503
@@ -1985,10 +2216,10 @@ index 0000000..b9a34ca
 +    return plan, report
 diff --git a/modules/robot_base/control/dance_runtime.py b/modules/robot_base/control/dance_runtime.py
 new file mode 100644
-index 0000000..a8be564
+index 0000000..c98ffee
 --- /dev/null
 +++ b/modules/robot_base/control/dance_runtime.py
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,159 @@
 +"""Single-owner dance admission, neutral entry, synchronized start, and lease."""
 +from __future__ import annotations
 +
@@ -2008,7 +2239,8 @@ index 0000000..a8be564
 +class DanceControllerMixin:
 +    async def dance_catalog(self):
 +        info = self.safe_motion_info()
-+        result = {"version": 1, "songs": SONGS, "duration": 30, "actions": [], "neutral_valid": False,
++        result = {"version": 2, "songs": SONGS, "duration": 30, "actions": [], "neutral_valid": False,
++                  "safety_latched": not self._safety.is_safe,
 +                  "motor_velocity_limit": info["max_velocity_units_s"]}
 +        try:
 +            result["neutral_valid"] = self.teaching_neutral() is not None
@@ -2093,6 +2325,9 @@ index 0000000..a8be564
 +        async def watchdog():
 +            while True:
 +                await asyncio.sleep(.1)
++                if run.get('cancelled'):
++                    await self.stop_all()
++                    return
 +                if time.monotonic() - run["heartbeat"] > LEASE_SECONDS:
 +                    run["error"] = "Dance stopped: laptop connection lost"
 +                    run["cancelled"] = True
@@ -2107,6 +2342,8 @@ index 0000000..a8be564
 +            while time.monotonic() < deadline:
 +                guard()
 +                await asyncio.sleep(min(.025, max(0, deadline - time.monotonic())))
++            if run.get('audio_ready') is not True:
++                raise ValueError('Laptop audio was not armed before the count-in ended; dance stopped')
 +            # No surprise jump if the supported arm drifted during the count-in.
 +            measured = validate_positions(await self.read_positions(), record["info"]["joints"], complete=True)
 +            target = record["neutral"]["positions"]
@@ -2126,8 +2363,19 @@ index 0000000..a8be564
 +            guard()
 +            await self._submit_direct(record["plan"], transmit_live_baseline=False, before_execute=guard, on_ready=countdown)
 +            guard()
++            run['state'] = 'finishing'
 +            await self._wait_for_teaching_neutral(record["neutral"]["positions"], generation, calibration)
++            guard()
++            run['state'] = 'completed'
++        except asyncio.CancelledError:
++            run['state'] = 'failed' if run.get('error') else 'stopped'
++            raise
++        except Exception as error:
++            run['state'] = 'failed'
++            run['error'] = str(error) or 'Dance interrupted'
++            raise
 +        finally:
++            run['ended_at'] = time.time()
 +            watch.cancel()
 +            await asyncio.gather(watch, return_exceptions=True)
 +            self._dance_prepared.pop(identifier, None)
@@ -2747,10 +2995,10 @@ index 0000000..9cff781
 +]
 diff --git a/tests/dancing_dom_smoke.cjs b/tests/dancing_dom_smoke.cjs
 new file mode 100644
-index 0000000..936887d
+index 0000000..baed020
 --- /dev/null
 +++ b/tests/dancing_dom_smoke.cjs
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,188 @@
 +/* Actual React interactions; all device APIs and audio are simulated. */
 +const assert = require('node:assert/strict');
 +const path = require('node:path');
@@ -2786,7 +3034,7 @@ index 0000000..936887d
 +  if (url === '/api/dances') {
 +    if (state.oldBackend) return new Response(`<!doctype html><html lang=en><title>${legacyStatus} Method Not Allowed</title></html>`, { status: legacyStatus });
 +    if (state.warming > 0) { state.warming--; return new Response(JSON.stringify({ error: 'Main program is not running' }), { status: 503 }); }
-+    result = { version: 1, songs, neutral_valid: true, actions: [{ name: 'teach_nod_t02' }] };
++    result = { version: state.backendVersion || 2, songs, neutral_valid: true, safety_latched: false, actions: [{ name: 'teach_nod_t02' }] };
 +  }
 +  if (url === '/api/dances/status') {
 +    result = { ...state.status, server_time: Date.now() / 1000 };
@@ -2802,11 +3050,18 @@ index 0000000..936887d
 +      result = { id: 'dance_preview', report: report(data.dance.song_id, data.dance.variation), expires_in: 180 };
 +    }
 +    if (data.dance.operation === 'start') {
++      assert.equal(data.dance.audio_mode, 'laptop_beat');
 +      state.status = { id: data.dance.id, song_id: 'waterloo', state: 'countdown', start_at: Date.now() / 1000 + 2.5 };
 +      result = { ...state.status, server_time: Date.now() / 1000 };
 +    }
 +    if (data.dance.operation === 'heartbeat') result = { ...state.status, server_time: Date.now() / 1000 };
++    if (data.dance.operation === 'audio_ready') {
++      if (state.rejectAudio) return new Response(JSON.stringify({ error: 'Audio missed the synchronized start' }), { status: 409 });
++      assert.equal(data.dance.start_at, state.status.start_at);
++      result = { ...state.status, audio_ready: true, server_time: Date.now() / 1000 };
++    }
 +  }
++  if (url === '/api/audio/output-devices') result = { available: true, devices: [{ id: 'auto_null', name: 'Dummy Output', connected: true, selected: true }] };
 +  if (url === '/api/animations/stop') state.status = { ...state.status, state: 'stopped' };
 +  if (url === '/api/program/status') result = { running: true };
 +  if (url === '/api/program/start') { state.oldBackend = false; state.warming = 1; }
@@ -2837,6 +3092,10 @@ index 0000000..936887d
 +    await until(() => button('Prepare dance') && !button('Prepare dance').disabled);
 +    assert.equal(w.document.querySelectorAll('.dance-record').length, 5);
 +    assert.equal(button('Start 30s dance').disabled, true);
++    click('Test laptop audio');
++    await until(() => state.audioStarts > 0 && !button('Prepare dance').disabled);
++    assert.equal(operations('start').length, 0, 'audio test never starts motors');
++    assert.ok(w.document.body.textContent.includes('No lamp speaker detected'));
 +    click('Prepare dance');
 +    await until(() => !button('Start 30s dance').disabled);
 +    // The real backend returns explicit nulls before any run, not undefined.
@@ -2861,12 +3120,36 @@ index 0000000..936887d
 +    await until(() => state.status.state === 'countdown');
 +    state.releaseStaleStatus();
 +    await until(() => operations('heartbeat').length > 0 && state.audioStarts > before);
++    assert.equal(operations('audio_ready').length, 1);
 +    assert.equal(button('Start 30s dance').disabled, true);
 +    assert.equal(button('Prepare dance').disabled, true);
 +    assert.ok([...w.document.querySelectorAll('.dance-record')].every(b => b.disabled));
++    state.status = { ...state.status, state: 'completed', ended_at: Date.now() / 1000 };
++    await until(() => w.document.body.textContent.includes('Complete · back at neutral') && !button('Prepare dance').disabled);
++    assert.equal(button('Start 30s dance').disabled, true);
++    assert.equal(w.document.querySelector('.dance-vinyl.spinning'), null);
++    click('Prepare dance');
++    await until(() => !button('Start 30s dance').disabled);
++    click('Start 30s dance');
++    await until(() => state.status.state === 'countdown' && !button('Stop').disabled);
 +    click('Stop');
 +    await until(() => state.status.state === 'stopped' && !button('Prepare dance').disabled);
 +    assert.ok(state.audioStops > 0);
++    click('Prepare dance');
++    await until(() => !button('Start 30s dance').disabled);
++    click('Start 30s dance');
++    await until(() => state.status.state === 'countdown');
++    state.status = { ...state.status, state: 'failed', error: 'Simulated motor write failure' };
++    await until(() => w.document.body.textContent.includes('Dance failed') && !button('Prepare dance').disabled);
++    assert.ok(w.document.body.textContent.includes('Simulated motor write failure'));
++    assert.equal(button('Start 30s dance').disabled, true);
++    click('Prepare dance');
++    await until(() => !button('Start 30s dance').disabled);
++    state.rejectAudio = true;
++    click('Start 30s dance');
++    await until(() => w.document.body.textContent.includes('Audio missed the synchronized start') && !button('Prepare dance').disabled);
++    assert.equal(state.status.state, 'stopped', 'failed audio readiness cancels motor playback');
++    state.rejectAudio = false;
 +    click('Prepare dance');
 +    await until(() => !button('Start 30s dance').disabled);
 +    click('Start 30s dance');
@@ -2891,15 +3174,25 @@ index 0000000..936887d
 +    assert.equal(operations('start').length, dancesBeforeRestart, 'updating never starts a dance');
 +    assert.equal(button('Start 30s dance').disabled, true, 'still requires a fresh preview');
 +    assert.equal(w.document.querySelector('[role="alert"]'), null);
-+    console.log(`PASS: dance interactions, legacy ${legacyStatus} HTML upgrade gate, canceled restart, confirmed restart through temporary 503, fresh-preview lockout. No hardware requests.`);
++    state.status = { ...state.status, safety_latched: true };
++    await until(() => w.document.body.textContent.includes('Emergency stop is latched'));
++    assert.equal(button('Prepare dance').disabled, true);
++    assert.equal(button('Start 30s dance').disabled, true);
++    assert.equal(state.requests.some(r => /emergency.*clear|safety.*reset/.test(r.url)), false);
++    w.unmountDance();
++    state.backendVersion = 1;
++    w.mountDance();
++    await until(() => button('Load dance update'));
++    assert.equal(button('Start 30s dance').disabled, true, 'old synchronous backend cannot start new dances');
++    console.log(`PASS: prepare persistence, audio-only test, audio-ready failure, completion/error exit mode, Stop, safety, legacy ${legacyStatus}/v1 gates and restart readiness. No hardware requests.`);
 +  } finally { w.close(); }
 +})().catch(error => { console.error(error); process.exitCode = 1; });
 diff --git a/tests/dancing_legacy_backend_smoke.cjs b/tests/dancing_legacy_backend_smoke.cjs
 new file mode 100644
-index 0000000..d6c3827
+index 0000000..4566330
 --- /dev/null
 +++ b/tests/dancing_legacy_backend_smoke.cjs
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,39 @@
 +/* Verify the upgrade screen against the live OLD backend using GET only.
 + * This script refuses all other routes/methods and cannot restart or move it.
 + */
@@ -2911,12 +3204,13 @@ index 0000000..d6c3827
 +const dom = new JSDOM('<!doctype html><div id="root"></div>', {
 +  url: 'http://dance.test', runScripts: 'dangerously', pretendToBeVisual: true,
 +});
-+const w = dom.window, codes = [];
++const w = dom.window, codes = [], versions = [];
 +w.fetch = async (url, init = {}) => {
 +  assert.equal(init.method || 'GET', 'GET', 'read-only probe');
-+  assert.ok(['/api/dances', '/api/dances/status'].includes(url), 'read-only route allowlist');
++  assert.ok(['/api/dances', '/api/dances/status', '/api/audio/output-devices'].includes(url), 'read-only route allowlist');
 +  const response = await fetch(`http://127.0.0.1:8081${url}`, { signal: AbortSignal.timeout(3000) });
 +  codes.push(response.status);
++  if (url === '/api/dances' && response.ok) versions.push((await response.clone().json()).version);
 +  return response;
 +};
 +const bundle = buildSync({ stdin: { resolveDir: frontend, loader: 'tsx', contents: `
@@ -2930,17 +3224,17 @@ index 0000000..d6c3827
 +  try {
 +    const button = label => [...w.document.querySelectorAll('button')].find(b => b.textContent.trim() === label);
 +    for (let i = 0; i < 150 && !button('Load dance update'); i++) await new Promise(r => setTimeout(r, 30));
-+    assert.ok(codes.some(c => c === 404 || c === 405), 'requires the old backend');
++    assert.ok(codes.some(c => c === 404 || c === 405) || versions.some(v => v !== 2), 'requires the old backend');
 +    assert.ok(button('Load dance update'));
 +    assert.equal(button('Prepare dance').disabled, true);
 +    assert.equal(button('Start 30s dance').disabled, true);
 +    assert.equal(w.document.body.textContent.includes('<!doctype'), false);
-+    console.log(`PASS: live legacy backend returned ${codes.join(', ')}; actual React UI shows upgrade and blocks motion. GET-only.`);
++    console.log(`PASS: live backend status ${codes.join(', ')}, version ${versions.join(', ') || 'legacy'}; actual React UI shows upgrade and blocks motion. GET-only.`);
 +  } finally { w.close(); }
 +})().catch(error => { console.error(error); process.exitCode = 1; });
 diff --git a/tests/dancing_live_prepare_smoke.cjs b/tests/dancing_live_prepare_smoke.cjs
 new file mode 100644
-index 0000000..120c524
+index 0000000..444e49b
 --- /dev/null
 +++ b/tests/dancing_live_prepare_smoke.cjs
 @@ -0,0 +1,55 @@
@@ -2960,7 +3254,7 @@ index 0000000..120c524
 +  const method = init.method || 'GET';
 +  if (url === '/api/auth/session') return new Response(JSON.stringify({ authenticated: true, csrf_token: 'simulation' }));
 +  const payload = init.body ? JSON.parse(init.body) : null;
-+  assert.ok((method === 'GET' && ['/api/dances', '/api/dances/status'].includes(url)) ||
++  assert.ok((method === 'GET' && ['/api/dances', '/api/dances/status', '/api/audio/output-devices'].includes(url)) ||
 +    (method === 'POST' && url === '/api/animations/play' && payload?.dance?.operation === 'prepare'),
 +    'probe must not start/stop motion, sound, or the runtime');
 +  requests.push({ url, method, operation: payload?.dance?.operation });
@@ -3123,12 +3417,132 @@ index 0000000..41b149e
 +    console.log('PASS: actual React record, failed-save retry, missing-neutral lockout, hand-position release, save neutral, bank click/replay, stop, numbered retake, remount persistence, go to neutral, failed release, backend version gate, canceled restart. No hardware requests.');
 +  } finally { w.close(); }
 +})().catch(error => { console.error(error); process.exitCode = 1; });
+diff --git a/tests/unit/test_dance_lifecycle.py b/tests/unit/test_dance_lifecycle.py
+new file mode 100644
+index 0000000..daca980
+--- /dev/null
++++ b/tests/unit/test_dance_lifecycle.py
+@@ -0,0 +1,114 @@
++"""Real web/behavior/event-bus lifecycle with fake motors (never hardware)."""
++import asyncio
++import os
++import time
++
++import pytest
++
++from apps.robot_runtime.web.server import WebServer
++from core.event_bus import EventBus
++from modules.robot_base.behavior.runtime import BehaviorRuntime
++from modules.robot_base.behavior.motion_manager import MotionManager
++from modules.robot_base.behavior.motion_policy import RuleBasedMotionPolicy
++from modules.robot_base.behavior.policy import RuleBasedBehaviorPolicy
++from modules.robot_base.behavior.context_tracker import ContextTracker
++from tests.unit.test_dancing import runtime_fixture, SONGS
++
++
++async def exercise(tmp_path, monkeypatch, outcome='completed', *, realtime=False):
++    import modules.robot_base.control.dance_runtime as controller_module
++    import apps.robot_runtime.web.routes.dance_lifecycle as lifecycle_module
++    countdown = 2.5 if realtime else .12
++    monkeypatch.setattr(controller_module, 'COUNTDOWN_SECONDS', countdown)
++    controller, submitted, old_run, record = runtime_fixture(tmp_path)
++    record['run'] = None
++    record['report']['song'] = SONGS[0]
++    original_execute = controller._executor.execute
++    body_seconds = 30 if realtime else .3
++    async def fake_execute(plan):
++        await asyncio.sleep(body_seconds if submitted else (2 if realtime else .02))
++        if submitted and outcome == 'failed':
++            raise RuntimeError('Simulated motor write failure')
++        await original_execute(plan)
++    controller._executor.execute = fake_execute
++    bus = EventBus(handler_timeout_s=30 if realtime else .08)
++    if outcome in {'timeout', 'stop_rejected'}:
++        monkeypatch.setattr(lifecycle_module, 'TOTAL_TIMEOUT_SECONDS', .08)
++    if outcome == 'disconnect':
++        monkeypatch.setattr(controller_module, 'LEASE_SECONDS', .12)
++    tracker = ContextTracker()
++    manager = MotionManager(controller, RuleBasedMotionPolicy(), tracker)
++    behavior = BehaviorRuntime(event_bus=bus, context_tracker=tracker,
++        behavior_policy=RuleBasedBehaviorPolicy(), motion_manager=manager)
++    await behavior.start()
++    server = WebServer(motion_controller=controller, event_bus=bus, loop=asyncio.get_running_loop())
++    # The Stop route must also work when Teach has never been used this process.
++    server._teaching_playback = None
++    if outcome == 'stop_rejected':
++        async def reject_stop(**kwargs):
++            return {'ok': False, 'error': 'Simulated stop acknowledgment failure'}
++        server._request_behavior_stop_lifecycle = reject_stop
++    client = server.app.test_client()
++    try:
++        if outcome == 'safety':
++            controller._safety.emergency_stop()
++        response = await asyncio.to_thread(client.post, '/api/animations/play', json={
++            'dance': {'operation': 'start', 'id': 'dance_test', 'audio_mode': 'laptop_beat'}})
++        if outcome == 'safety':
++            assert response.status_code == 409 and 'latched' in response.json['error']
++            assert not submitted and server._dance_playback is None
++            return
++        assert response.status_code == 200
++        run = server._dance_playback
++        stop_requested = False
++        limit = time.monotonic() + (40 if realtime else 4)
++        while run.get('ended_at') is None or server._current_animation:
++            assert time.monotonic() < limit, run
++            if outcome != 'disconnect' or run['state'] != 'playing':
++                run['heartbeat'] = time.monotonic()  # simulated visible laptop
++            if run['state'] == 'countdown' and not run.get('audio_ready') and outcome != 'no_audio':
++                acknowledgment = await asyncio.to_thread(client.post, '/api/animations/play', json={
++                    'dance': {'operation': 'audio_ready', 'id': run['id'], 'start_at': run['start_at']}})
++                assert acknowledgment.status_code == 200
++            if outcome == 'stopped' and run['state'] == 'playing' and not stop_requested:
++                stopped = await asyncio.to_thread(client.post, '/api/animations/stop')
++                assert stopped.status_code == 200, stopped.json
++                assert run['state'] == 'stopped'
++                stop_requested = True
++            await asyncio.sleep(.015)
++        final = (await asyncio.to_thread(client.get, '/api/dances/status')).json
++        expected = 'failed' if outcome in {'failed', 'no_audio', 'timeout', 'stop_rejected', 'disconnect'} else outcome
++        assert final['state'] == expected, final
++        assert final['ended_at'] and server._current_animation is None
++        assert 'dance_test' not in controller._dance_prepared
++        assert bus.diagnostics()['handler_timeout_count'] == 0
++        if outcome == 'completed':
++            assert final['error'] is None and len(submitted) == 2
++            assert submitted[-1].waypoints[-1].positions == record['neutral']['positions']
++        elif outcome == 'failed':
++            assert final['error'] == 'Simulated motor write failure'
++        elif outcome == 'no_audio':
++            assert 'audio was not armed' in final['error'] and len(submitted) == 1
++        elif outcome == 'timeout':
++            assert 'timed out' in final['error']
++        elif outcome == 'stop_rejected':
++            assert 'Simulated stop acknowledgment failure' in final['error']
++            controller._executor.stop.assert_awaited()
++        elif outcome == 'disconnect':
++            assert 'laptop connection lost' in final['error']
++        elif outcome == 'stopped':
++            assert final['error'] is None
++        assert not bus._subscribers.get('motion.action.result')
++    finally:
++        await behavior.stop()
++        await bus.stop_background()
++
++
++@pytest.mark.parametrize('outcome', ['completed', 'failed', 'stopped', 'no_audio', 'timeout', 'safety', 'stop_rejected', 'disconnect'])
++def test_full_lifecycle_with_real_event_bus_and_fake_motors(tmp_path, monkeypatch, outcome):
++    asyncio.run(exercise(tmp_path, monkeypatch, outcome))
++
++
++@pytest.mark.skipif(os.environ.get('DANCE_REALTIME_TEST') != '1', reason='opt-in 35-second fake-motor regression')
++def test_full_30_second_dance_survives_default_bus_timeout(tmp_path, monkeypatch):
++    asyncio.run(exercise(tmp_path, monkeypatch, realtime=True))
 diff --git a/tests/unit/test_dancing.py b/tests/unit/test_dancing.py
 new file mode 100644
-index 0000000..5e00d08
+index 0000000..42d4c7b
 --- /dev/null
 +++ b/tests/unit/test_dancing.py
-@@ -0,0 +1,264 @@
+@@ -0,0 +1,293 @@
 +"""Dance compilation and admission tests; fake motors only."""
 +import asyncio
 +import math
@@ -3231,7 +3645,7 @@ index 0000000..5e00d08
 +    controller, submitted, measured, neutral = teaching_controller(tmp_path)
 +    controller._executor.stop = AsyncMock()
 +    target = controller.teaching_neutral()
-+    run = {'id': 'dance_test', 'song_id': 'waterloo', 'heartbeat': time.monotonic(), 'cancelled': False, 'error': None}
++    run = {'id': 'dance_test', 'song_id': 'waterloo', 'heartbeat': time.monotonic(), 'cancelled': False, 'error': None, 'audio_ready': True}
 +    plan = MotionPlan(waypoints=[Waypoint(positions=neutral, timestamp_ms=0), Waypoint(positions=neutral, timestamp_ms=30000)], duration_ms=30000)
 +    record = {'plan': plan, 'neutral': target, 'info': controller.safe_motion_info(), 'report': {'cues': []},
 +              'expires': time.monotonic() + 180, 'run': run}
@@ -3246,7 +3660,8 @@ index 0000000..5e00d08
 +    asyncio.run(controller.play_animation('dance_test'))
 +    assert len(submitted) == 2
 +    assert submitted[0].waypoints[-1].positions == record['neutral']['positions']
-+    assert run['state'] == 'playing' and run['start_at'] <= time.time()
++    assert run['state'] == 'completed' and run['start_at'] <= time.time()
++    assert run['ended_at'] >= run['start_at']
 +    assert 'dance_test' not in controller._dance_prepared
 +
 +
@@ -3341,27 +3756,37 @@ index 0000000..5e00d08
 +    from tests.unit.test_teaching import fixture
 +    from apps.robot_runtime.web.routes.dancing import register_dance_routes
 +    from apps.robot_runtime.web.legacy_routes.animations import register_animation_routes
++    from core.event_bus import EventBus
++    from core.event_lifecycle import EventLifecycleClient
 +    server, _ = fixture(tmp_path, recording=False)
 +    record = {'report': {'song': SONGS[0]}}
 +    prepared = {'id': 'dance_test', 'report': record['report'], 'expires_in': 180}
 +    server.motion = SimpleNamespace(
 +        prepare_dance=AsyncMock(return_value=prepared),
-+        dance_catalog=AsyncMock(return_value={'version': 1, 'songs': SONGS}),
++        dance_catalog=AsyncMock(return_value={'version': 2, 'songs': SONGS}),
 +        _dance_record=lambda _: record, _dance_prepared={'dance_test': record},
 +        validate_dance_entry=AsyncMock(side_effect=ValueError(failure) if failure else None))
 +    server._motion_status = lambda: {'torque_enabled': False, 'current_idle': None, 'is_moving': False}
 +    server._fire_and_forget = asyncio.run
 +    success = {'ok': True, 'result': {'success': True}}
 +    server._publish_lifecycle_request = AsyncMock(return_value=success)
-+    server._request_behavior_intent_lifecycle = AsyncMock(return_value=success)
++    server._request_behavior_stop_lifecycle = AsyncMock(return_value=success)
++    server.event_bus = EventBus()
++    server._event_failure_reason = EventLifecycleClient.failure_reason
++    async def admission(intent, **kwargs):
++        assert not intent.metadata.get('synchronous_motion')
++        await server.event_bus.publish('motion.action.result', 'test', {
++            'action_id': kwargs['action_id'], 'state': 'SUCCEEDED'})
++        return success
++    server._request_behavior_intent_lifecycle = AsyncMock(side_effect=admission)
 +    register_dance_routes(server)
 +    register_animation_routes(server)
 +    client = server.app.test_client()
-+    assert client.get('/api/dances').json['version'] == 1
++    assert client.get('/api/dances').json['version'] == 2
 +    assert client.post('/api/animations/play', json={'dance': {'operation': 'prepare', 'song_id': 'waterloo'}}).status_code == 200
 +    server._publish_lifecycle_request.assert_not_awaited()
 +    server._request_behavior_intent_lifecycle.assert_not_awaited()
-+    response = client.post('/api/animations/play', json={'dance': {'operation': 'start', 'id': 'dance_test'}})
++    response = client.post('/api/animations/play', json={'dance': {'operation': 'start', 'id': 'dance_test', 'audio_mode': 'laptop_beat'}})
 +    assert response.status_code == 200
 +    server.motion.validate_dance_entry.assert_awaited_once()
 +    status = client.get('/api/dances/status').json
@@ -3374,7 +3799,7 @@ index 0000000..5e00d08
 +        assert server._publish_lifecycle_request.call_args.kwargs['data']['hold_present']
 +        intent = server._request_behavior_intent_lifecycle.call_args.args[0]
 +        assert intent.suggested_motion == 'dance_test'
-+        assert intent.metadata['synchronous_motion'] is True
++        assert intent.metadata['async_motion'] is True
 +
 +
 +def test_active_dance_excludes_other_animation_neutral_save_and_second_start(tmp_path):
@@ -3393,6 +3818,24 @@ index 0000000..5e00d08
 +    assert server._dance_playback['heartbeat'] == 0
 +    assert client.post('/api/animations/play', json={'dance': {'operation': 'heartbeat', 'id': 'dance_owner'}}).status_code == 200
 +    assert server._dance_playback['heartbeat'] > 0
++
++
++@pytest.mark.parametrize('kind', ['valid', 'wrong_id', 'stale', 'late', 'boolean', 'nan', 'not_countdown'])
++def test_audio_ready_requires_matching_run_and_live_countdown(tmp_path, kind):
++    from tests.unit.test_teaching import fixture
++    from apps.robot_runtime.web.routes.dancing import register_dance_routes
++    from apps.robot_runtime.web.legacy_routes.animations import register_animation_routes
++    server, _ = fixture(tmp_path, recording=False)
++    register_dance_routes(server)
++    register_animation_routes(server)
++    start = time.time() + (0 if kind == 'late' else 2)
++    server._dance_playback = {'id': 'dance_owner', 'state': 'playing' if kind == 'not_countdown' else 'countdown',
++                              'start_at': start, 'heartbeat': 0, 'audio_ready': False}
++    stamp = start - 1 if kind == 'stale' else True if kind == 'boolean' else float('nan') if kind == 'nan' else start
++    response = server.app.test_client().post('/api/animations/play', json={'dance': {
++        'operation': 'audio_ready', 'id': 'other' if kind == 'wrong_id' else 'dance_owner', 'start_at': stamp}})
++    assert response.status_code == (200 if kind == 'valid' else 409)
++    assert server._dance_playback['audio_ready'] is (kind == 'valid')
 diff --git a/tests/unit/test_idle_route.py b/tests/unit/test_idle_route.py
 index d7ef77a..8e91e1c 100644
 --- a/tests/unit/test_idle_route.py
