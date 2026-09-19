@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot_robot_astra"
+version = "0.1.0"
+description = "LeRobot plugin for the astra-guitar SO-101 arms (supports renumbered servo IDs)"
+requires-python = ">=3.12"
+dependencies = ["lerobot[feetech]"]
+
+[project.optional-dependencies]
+agent = ["anthropic>=1.7", "openai", "sounddevice", "numpy", "opencv-python-headless"]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["lerobot_robot_astra"]
