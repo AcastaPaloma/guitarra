@@ -8,7 +8,7 @@ Set neutral on the actual device, and retain its calibration and safety limits.
 
 Dance composition extracts a contiguous 3.2-second phrase from each long take
 (up to 4.5 seconds for bows), choosing an active window. The preview discloses
-the source window and source hash. It linearly retimes a copy, samples the result
+the source window and source hash. It retimes a copy with an eased start/stop clock, samples the result
 at the controller rate, and validates the complete neutral-entry/action/return
 path. No source CSV is overwritten and no mirrored or amplified pose is added.
 
