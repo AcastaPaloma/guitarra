@@ -8,6 +8,9 @@ protocol over the Waveshare bus servo adapter — no lerobot install needed.
 `fret.py` is the complete tool surface — it sounds notes by tapping the
 pre-recorded keys in `keyframes_arm2.json`.
 
+Baseline pose, measured geometry, world frame, and the keypoint XYZ layer
+are documented in **[CALIBRATION.md](CALIBRATION.md)**.
+
 ## Run
 
 ```bash
