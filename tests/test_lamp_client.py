@@ -7,6 +7,7 @@ import unittest
 
 from band.adapters.lamp.client import LampClient, LampError
 from band.performance.primitives import JOINTS
+from band.rehearsal.commission import HeldJointGuard
 
 
 class FakeRuntime:
@@ -128,6 +129,21 @@ class ClientTests(unittest.TestCase):
             self.client.wait("a1", timeout=0.25)
         self.assertIsNone(self.client._active)
         self.assertTrue(any(c[1].endswith("/cancel") for c in self.runtime.calls))
+        self.assertFalse(any(b"system.stop" in (c[2] or b"") for c in self.runtime.calls))
+
+    def test_held_joint_drift_cancels_through_sdk_without_torque_release(self):
+        self.runtime.states = ["running"]
+        guard = HeldJointGuard(self.runtime.telemetry["positions"])
+        self.play()
+
+        def observe_drift(timestamp, action):
+            self.runtime.telemetry["positions"]["elbow_pitch"] += .4
+            guard.check(self.client.observe().data["positions"])
+
+        with self.assertRaisesRegex(RuntimeError, "Held elbow_pitch drift"):
+            self.client.wait("a1", on_update=observe_drift)
+        self.assertIsNone(self.client._active)
+        self.assertEqual(sum(c[1].endswith("/cancel") for c in self.runtime.calls), 1)
         self.assertFalse(any(b"system.stop" in (c[2] or b"") for c in self.runtime.calls))
 
     def test_unconfirmed_cancellation_is_explicit_fault(self):

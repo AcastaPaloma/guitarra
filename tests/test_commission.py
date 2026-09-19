@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from band.performance.composer import StageEnvelope
 from band.performance.primitives import JOINTS
-from band.rehearsal.commission import build_probe, require_held_runtime
+from band.rehearsal.commission import HeldJointGuard, build_probe, require_held_runtime
 from band.rehearsal.runner import SIMULATION_STAGE
 
 
@@ -70,6 +70,27 @@ class CommissionTests(unittest.TestCase):
             self.assertLess(min(p[joint] for p in frames), -2.9)
             self.assertTrue(all(p[j] == 0 for p in frames for j in JOINTS if j != joint))
         self.assertEqual(result.frames[-1][1], self.stage.baseline)
+
+    def test_dance_keeps_elbow_target_fixed_and_increases_only_turn_and_roll(self):
+        result = build_probe(self.stage, "dance")
+        self.assertEqual(result.duration_seconds, 25)
+        for _, pose in result.frames:
+            self.assertEqual(pose["elbow_pitch"], self.stage.baseline["elbow_pitch"])
+            for joint in ("base_pitch", "wrist_pitch"):
+                self.assertLessEqual(abs(pose[joint]), 2)
+        for joint in ("base_yaw", "wrist_roll"):
+            self.assertGreater(max(p[joint] for _, p in result.frames), 3.9)
+            self.assertLess(min(p[joint] for _, p in result.frames), -3.9)
+
+    def test_held_joint_guard_stops_cumulative_drift_without_rebasing(self):
+        positions = dict(self.stage.baseline)
+        guard = HeldJointGuard(positions)
+        for offset in (.2, .4, .7):
+            guard.check({**positions, "elbow_pitch": offset})
+        for offset in (.76, -.76, float("nan")):
+            with self.assertRaises((RuntimeError, ValueError)):
+                guard.check({**positions, "elbow_pitch": offset})
+        self.assertEqual(guard.reference, 0)
 
 
 if __name__ == "__main__":

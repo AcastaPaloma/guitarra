@@ -1,0 +1,79 @@
+{
+  "stage": {
+    "envelope_id": "lelamp-open-pose-20260919-v1",
+    "robot_id": "lelamp_v1_pi5_feetech_r1",
+    "calibration_id": "6db033866d113894de08ede96015882bc406b38dd364a4476e9fa3d50ce00077",
+    "baseline": {
+      "base_pitch": -52.91644771413557,
+      "base_yaw": -3.914988814317681,
+      "elbow_pitch": -68.32917705735662,
+      "wrist_pitch": -16.316316316316318,
+      "wrist_roll": 2.6631853785900717
+    },
+    "offset_limits": {
+      "base_yaw": [
+        -4,
+        4
+      ],
+      "base_pitch": [
+        -4,
+        4
+      ],
+      "elbow_pitch": [
+        -4,
+        4
+      ],
+      "wrist_roll": [
+        -4,
+        4
+      ],
+      "wrist_pitch": [
+        -4,
+        4
+      ]
+    },
+    "dynamics": {
+      "base_yaw": [
+        8,
+        32,
+        200
+      ],
+      "base_pitch": [
+        8,
+        32,
+        200
+      ],
+      "elbow_pitch": [
+        8,
+        32,
+        200
+      ],
+      "wrist_roll": [
+        8,
+        32,
+        200
+      ],
+      "wrist_pitch": [
+        8,
+        32,
+        200
+      ]
+    },
+    "partner_sign": 1,
+    "bow_sign": 1,
+    "hardware_verified": false,
+    "verification_runs": []
+  },
+  "kind": "dance",
+  "clip": {
+    "calibration_id": "6db033866d113894de08ede96015882bc406b38dd364a4476e9fa3d50ce00077",
+    "duration_seconds": 25.0,
+    "id": "f3fbec3d9f824b0896182e767596762d",
+    "robot_id": "lelamp_v1_pi5_feetech_r1",
+    "sha256": "ecae4c75e180c576e4440a05bf975b9afd0948ef816901d15c1e26f6cf5d6586"
+  },
+  "motion_submitted": false,
+  "seconds": 25.0,
+  "elbow_target_fixed": true,
+  "status": "SDK upload validated; playback not submitted; physical clearance pending"
+}

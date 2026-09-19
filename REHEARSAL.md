@@ -152,3 +152,30 @@ new action. Result status `executor_completed` is deliberately distinct from
 physical tracking approval. Never set `hardware_verified` merely because an
 SDK clip succeeded. Existing completion tolerances, gains and calibration have
 not been modified.
+
+
+## More visible four-axis test
+
+`--kind dance` authors a 25-second trial: 2.5-second initial hold, 20-second
+phased dance, and 2.5-second ending hold. Turn/yaw and head roll use ±4 units
+(twice the prior showcase wiggle); waist and head pitch remain ±2. The elbow
+stays at the original planned target. Eight-beat cycles and fades retain the
+existing speed/acceleration/jerk bounds; no stage envelope was expanded.
+
+```sh
+python3 -m band.rehearsal.recorded --stage evidence/commission-stage-2026-09-19.json --kind dance --ffmpeg /absolute/path/to/ffmpeg --output rehearsal-media/dance-01
+```
+
+This trial additionally cancels if elbow feedback moves more than 0.75 normalized
+units from its pretrial observed position. That observation is only a fixed stop
+reference: it never changes any trajectory target or the stage baseline. The
+threshold is a conservative local trial stop condition, not universal hardware
+calibration or proof that smaller drift is safe. The SDK entry is monitored too.
+A cancellation retains torque, confirms the SDK terminal state, and leaves idle
+off. Do not repeat a drift failure with a wider threshold or compensate the elbow.
+
+The first candidate was uploaded and validated by the installed SDK as clip
+`f3fbec3d9f824b0896182e767596762d` (SHA-256
+`ecae4c75e180c576e4440a05bf975b9afd0948ef816901d15c1e26f6cf5d6586`).
+At preparation time no playback was submitted because a laptop was close behind
+the head. Full physical clearance is required before executing the command.

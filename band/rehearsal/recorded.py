@@ -64,7 +64,7 @@ def recorded_probe(stage, kind, output, base_url, token, ffmpeg, camera="0:none"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", type=Path, required=True)
-    parser.add_argument("--kind", choices=("small", "envelope", "joint", "showcase"), required=True)
+    parser.add_argument("--kind", choices=("small", "envelope", "joint", "showcase", "dance"), required=True)
     parser.add_argument("--joint", choices=JOINTS)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ffmpeg", required=True)

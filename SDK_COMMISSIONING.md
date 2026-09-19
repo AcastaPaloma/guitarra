@@ -134,3 +134,18 @@ Replay instructions are in [REHEARSAL.md](REHEARSAL.md). The public
 [LeLamp runtime](https://github.com/humancomputerlab/lelamp_runtime) exists, but the
 installed hackathon runtime and its authenticated SDK contract were inspected
 and used; installing a different public runtime was unnecessary.
+
+
+## Requested larger dance — prepared, clearance pending
+
+A subsequent `dance` diagnostic doubles yaw/roll amplitude relative to the
+completed showcase wiggle, retains the ±4 tested authoring bound, and keeps the
+elbow target fixed. `HeldJointGuard` watches actual elbow movement against a
+fixed pretrial reference and triggers SDK cancellation above 0.75 units. A new
+integration regression verifies cancellation without torque release. The suite
+now has 36 passing checks.
+
+The SDK accepted the 25-second candidate upload without commanding motion.
+The current camera setup places a laptop close behind the head; its removal from
+the turning space was requested. No exaggerated-dance completion is claimed.
+The previous diagnostic evidence and unresolved elbow finding remain unchanged.

@@ -14,9 +14,27 @@ import time
 import uuid
 
 from band.adapters.lamp.client import LampClient
-from band.performance.composer import StageEnvelope, compose
+from band.performance.composer import StageEnvelope, compose, finite
 from band.performance.primitives import JOINTS, Primitive, Wave
 from band.rehearsal.observe import capture_is_fresh, get_json
+
+
+class HeldJointGuard:
+    """Halt on movement of a joint excluded from choreography; never rebase goals."""
+
+    def __init__(self, positions, joint="elbow_pitch", maximum_drift=.75):
+        if joint not in JOINTS:
+            raise ValueError("Unknown held joint")
+        self.joint = joint
+        self.reference = finite(positions[joint], "held joint reference")
+        self.maximum_drift = finite(maximum_drift, "held joint drift threshold")
+        if self.maximum_drift <= 0:
+            raise ValueError("Held joint drift threshold must be positive")
+
+    def check(self, positions):
+        current = finite(positions[self.joint], "held joint observation")
+        if abs(current - self.reference) > self.maximum_drift:
+            raise RuntimeError(f"Held {self.joint} drift exceeded {self.maximum_drift} normalized units")
 
 
 def require_held_runtime(base_url):
@@ -34,12 +52,28 @@ def build_probe(stage, kind, joint=None):
     stage.validate()
     if stage.robot_id == "simulation":
         raise ValueError("Commissioning requires a device-specific stage")
-    if kind not in ("small", "envelope", "joint", "showcase"):
+    if kind not in ("small", "envelope", "joint", "showcase", "dance"):
         raise ValueError("Unknown commissioning probe")
     # This initial protocol is deliberately local to a pose. Larger envelopes
     # require a separately reviewed protocol, not an accidental file edit.
     if any(max(abs(v) for v in bounds) > 4 for bounds in stage.offset_limits.values()):
         raise ValueError("Initial commissioning probes are limited to four normalized units per axis")
+    if kind == "dance":
+        if joint is not None:
+            raise ValueError("Dance joint allocation is fixed")
+        # A more readable turn/roll, with smaller load-changing waist/head
+        # movement. Exclude the unreliable elbow from authored choreography.
+        amplitudes = {"base_yaw": 4, "base_pitch": 2, "wrist_roll": 4, "wrist_pitch": 2}
+        phases = {"base_yaw": 0, "base_pitch": .5, "wrist_roll": 1, "wrist_pitch": .5}
+        tracks = {j: Wave(min(a, -stage.offset_limits[j][0], stage.offset_limits[j][1]),
+                          8, phases[j], fade_beats=8) for j, a in amplitudes.items()}
+        if any(w.amplitude <= 0 for w in tracks.values()):
+            raise ValueError("Dance requires positive and negative offsets on its four axes")
+        return compose([
+            Primitive("settled_start", 4, {}, stage.envelope_id),
+            Primitive("four_axis_dance", 32, tracks, stage.envelope_id),
+            Primitive("settled_end", 4, {}, stage.envelope_id),
+        ], stage)
     if kind == "showcase":
         if joint is not None:
             raise ValueError("Showcase uses all five calibrated joints")
@@ -113,7 +147,12 @@ def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=No
                                       "type": kind, "data": data}, allow_nan=False) + "\n")
             client.connect()
             record("runtime_before", runtime_before)
-            record("before", asdict(client.observe()))
+            before = client.observe()
+            record("before", asdict(before))
+            held_guard = HeldJointGuard(before.data["positions"]) if kind == "dance" else None
+            if held_guard:
+                result["held_joint_guard"] = {"joint": held_guard.joint, "reference": held_guard.reference,
+                                               "maximum_drift": held_guard.maximum_drift}
             clip = client.upload_scene(compiled, stage)
             record("validated", clip)
             action = client.play_clip(clip, client.observe(), idempotency_key=result["run_id"])
@@ -122,9 +161,21 @@ def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=No
 
             def update(timestamp, action):
                 if not capture_is_fresh(camera_log):
+                    result["fault_reason"] = "camera_stale"
                     raise RuntimeError("External recorder stopped updating")
                 record("action", action)
-                record("telemetry", asdict(client.observe()))
+                observation = client.observe()
+                record("telemetry", asdict(observation))
+                if held_guard:
+                    try:
+                        held_guard.check(observation.data["positions"])
+                    except RuntimeError:
+                        result["fault_reason"] = "held_joint_drift"
+                        record("held_joint_guard_fault", {
+                            **result["held_joint_guard"],
+                            "observed": observation.data["positions"][held_guard.joint],
+                        })
+                        raise
 
             result["action"] = client.wait(identifier, timeout=compiled.duration_seconds + 30, on_update=update)
             result["final_observation"] = asdict(client.observe())
@@ -147,7 +198,7 @@ def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=No
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", type=Path, required=True)
-    parser.add_argument("--kind", choices=("small", "envelope", "joint", "showcase"), required=True)
+    parser.add_argument("--kind", choices=("small", "envelope", "joint", "showcase", "dance"), required=True)
     parser.add_argument("--joint", choices=JOINTS)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--camera-log", type=Path, required=True)
