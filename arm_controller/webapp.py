@@ -201,10 +201,26 @@ PAGE = """<!doctype html>
   .note b { display:block; font-size:14px; }
   .note.now { background:var(--accent); border-color:var(--accent); color:var(--paper); }
   .note.done { border-color:var(--accent); color:var(--accent); }
+  .steps { display:flex; justify-content:center; gap:28px; margin-bottom:30px;
+           font-size:12px; letter-spacing:2px; }
+  .step { opacity:.35; }
+  .step.done { opacity:1; }
+  .step.on { opacity:1; color:var(--accent); }
+  #now { display:none; text-align:center; margin-top:24px; }
+  #now .pitch { font-size:46px; font-weight:bold; color:var(--accent); line-height:1; }
+  #now .where { font-size:13px; letter-spacing:2px; margin-top:6px; }
+  .bar { height:14px; border:2px solid var(--ink); margin-top:16px; }
+  .bar div { height:100%; width:0; background:var(--accent); }
+  #count { font-size:12px; margin-top:6px; }
 </style></head><body>
 <h1>GUITARRA</h1>
 <div class="sub">one arm &middot; eighteen keys &middot; tap only</div>
 <main>
+  <div class="steps">
+    <span class="step on" id="st1">1 PROMPT</span>
+    <span class="step" id="st2">2 NOTES</span>
+    <span class="step" id="st3">3 TAP</span>
+  </div>
   <textarea id="prompt" placeholder="tell it what to play&hellip; a song, a melody, or paste a song sheet"></textarea>
   <div class="examples">
     <button data-x="Play Hot Cross Buns">hot cross buns</button>
@@ -218,6 +234,12 @@ PAGE = """<!doctype html>
   <div id="status"></div>
   <section id="plan">
     <h2 id="title"></h2>
+    <div id="now">
+      <div class="pitch"></div>
+      <div class="where"></div>
+      <div class="bar"><div id="fill"></div></div>
+      <div id="count"></div>
+    </div>
     <div class="notes" id="notes"></div>
     <div class="actions">
       <button class="btn primary" id="play">TAP IT OUT</button>
@@ -227,53 +249,83 @@ PAGE = """<!doctype html>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let planNotes = [], poller = null;
+let planNotes = [], poller = null, lastIdx = -1;
 document.querySelectorAll('.examples button').forEach(b =>
   b.onclick = () => { $('prompt').value = b.dataset.x.replace(/&#10;/g,'\\n'); });
 const say = (msg, err) => { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; };
+const setStep = n => [1,2,3].forEach(i =>
+  $('st'+i).className = 'step' + (i === n ? ' on' : i < n ? ' done' : ''));
 
 $('convert').onclick = async () => {
   const prompt = $('prompt').value.trim();
   if (!prompt) return say('write something first', true);
-  $('convert').disabled = true; say('asking the model\\u2026');
+  $('convert').disabled = true; setStep(1); say('asking the model\\u2026');
   try {
     const r = await fetch('/api/plan', {method:'POST', headers:{'Content-Type':'application/json'},
                                         body: JSON.stringify({prompt})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.status);
-    planNotes = d.notes;
+    planNotes = d.notes; lastIdx = -1;
     $('title').textContent = d.title + '  \\u00b7  ' + d.notes.length + ' notes';
     $('notes').innerHTML = d.notes.map(n =>
       `<div class="note"><b>${n.pitch}</b>s${n.string} f${n.fret}</div>`).join('');
-    $('plan').style.display = 'block'; say('review the notes, then tap it out');
+    $('now').style.display = 'none'; $('fill').style.width = '0';
+    $('plan').style.display = 'block'; setStep(2);
+    say('review the notes, then tap it out');
   } catch (e) { say('plan failed: ' + e.message, true); }
   $('convert').disabled = false;
 };
 
 $('play').onclick = async () => {
-  $('play').disabled = true; $('stop').disabled = false; say('playing\\u2026');
+  $('play').disabled = true; $('stop').disabled = false;
+  setStep(3); lastIdx = -1;
+  $('now').style.display = 'block'; $('fill').style.width = '0';
+  document.querySelector('#now .pitch').textContent = '\\u2026';
+  document.querySelector('#now .where').textContent = 'moving to the first key';
+  $('count').textContent = ''; say('');
   try {
     const r = await fetch('/api/play', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({notes: planNotes.map(n => ({string:n.string, fret:n.fret}))})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.status);
     poller = setInterval(poll, 300);
-  } catch (e) { say('play failed: ' + e.message, true); $('play').disabled = false; $('stop').disabled = true; }
+  } catch (e) {
+    say('play failed: ' + e.message, true);
+    $('play').disabled = false; $('stop').disabled = true; setStep(2);
+  }
 };
 
-$('stop').onclick = () => fetch('/api/stop', {method:'POST'});
+$('stop').onclick = () => { fetch('/api/stop', {method:'POST'}); say('stopping\\u2026'); };
 
 async function poll() {
   const s = await (await fetch('/api/status')).json();
+  if (s.playing && s.index >= 0) lastIdx = s.index;
+  const doneUpTo = s.playing ? s.index : (s.error || s.stop ? lastIdx + 1 : planNotes.length);
   document.querySelectorAll('.note').forEach((el, i) => {
-    el.className = 'note' + (i === s.index ? ' now' : (s.index > i || !s.playing) && el.className.includes('now') ? ' done' : el.className.includes('done') ? ' done' : ''));
+    el.className = 'note' + (s.playing && i === s.index ? ' now' : i < doneUpTo ? ' done' : '');
   });
-  if (s.index >= 0) say(`tapping ${s.index + 1} / ${s.total}`);
+  if (s.playing && s.index >= 0) {
+    const n = planNotes[s.index];
+    document.querySelector('#now .pitch').textContent = n.pitch;
+    document.querySelector('#now .where').textContent =
+      'string ' + n.string + ' \\u00b7 fret ' + n.fret;
+    $('fill').style.width = ((s.index + 1) / s.total * 100) + '%';
+    $('count').textContent = 'note ' + (s.index + 1) + ' of ' + s.total;
+  }
   if (!s.playing) {
     clearInterval(poller); poller = null;
     $('play').disabled = false; $('stop').disabled = true;
-    say(s.error ? 'error: ' + s.error : 'done \\u2014 arm back at rest');
-    if (s.error) $('status').className = 'err';
+    if (s.error) {
+      say('error: ' + s.error, true); setStep(2);
+    } else if (s.stop) {
+      say('stopped \\u2014 arm back at rest'); setStep(2);
+    } else {
+      $('fill').style.width = '100%';
+      document.querySelector('#now .pitch').textContent = '\\u2713';
+      document.querySelector('#now .where').textContent = 'all notes tapped';
+      $('count').textContent = planNotes.length + ' of ' + planNotes.length;
+      say('done \\u2014 arm back at rest');
+    }
   }
 }
 </script></body></html>"""
