@@ -32,6 +32,29 @@ play. The audio analyzer estimates onset timing near the chosen tempo; it does
 not guarantee the correct downbeat, meter, or tempo of every recording. Preview
 and adjust the excerpt/tempo, especially for intros, live versions, or jazz.
 
+### If you previously saw “405 Method Not Allowed”
+
+Refresh the dashboard to load the corrected frontend. The older robot backend
+returns 405 (rather than 404) for new Dance URLs because its generic API route
+only supports OPTIONS. The UI now recognizes both responses and displays
+**Load dance update**, with playback disabled until the new backend is ready.
+It retries read-only readiness checks through temporary startup errors; it never
+restarts automatically. Support the lamp before confirming the restart.
+
+The fix was tested against the actual running legacy backend with the GET-only
+`tests/dancing_legacy_backend_smoke.cjs` check, as well as simulated 404/405 and
+temporary 503 startup responses. HTML error pages are no longer dumped into the
+dashboard. The frontend build and all 29 frontend tests passed after this fix.
+
+### Lamp-speaker availability
+
+Dance audio currently plays on the laptop. A read-only device check on this lamp
+on 2026-09-19 found only PipeWire's **Dummy Output**: no USB playback device,
+no known Bluetooth speaker, and both HDMI connectors disconnected. A saved
+ReSpeaker input preference exists, but that USB device is not enumerated.
+Speaker playback cannot be verified until a real audio output is connected;
+the device configuration and output routing have not been changed.
+
 ## Five presets
 
 These are approximate tempo references, not analysis of a bundled master.
