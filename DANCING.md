@@ -14,7 +14,9 @@ The existing paired dashboard hosts it; no extra service or serial owner.
 3. Pick a song, then **Prepare dance**. This validates and previews the plan
    without moving the lamp or changing motor power. **Remix** changes its order
    and choice of takes. Previews expire after three minutes.
-4. **Hear audio only** previews sound without motor commands. A built-in
+4. **Test laptop audio** plays three tones without preparation or motor commands.
+   Check the laptop's output/mute and the tab's volume first. **Hear audio only**
+   previews the prepared excerpt without motor commands. A built-in
    metronome works immediately. For the actual song, **Attach audio**, choose
    an excerpt start, and **Analyze beats**, then prepare again. Files stay in
    this browser's memory, are never uploaded, and need reattaching after reload.
@@ -22,6 +24,8 @@ The existing paired dashboard hosts it; no extra service or serial owner.
    saved neutral, counts in, and schedules laptop audio and the lamp together.
    Keep the tab visible and supervise playback. Entry/count-in are additional
    to the 30-second choreography, not taken out of the excerpt.
+   An emergency-stop latch blocks Start; it is never cleared automatically.
+   Inspect/support the lamp before explicitly clearing it in Controls.
 6. **Stop** cancels remaining commands and sound while retaining motor holding.
    It does not release power or command a return home. Leaving/hiding the tab
    stops its dance; a missing heartbeat cancels commands within four seconds.
@@ -31,6 +35,42 @@ are metronomes, not substitutes for the songs. Use audio you have permission to
 play. The audio analyzer estimates onset timing near the chosen tempo; it does
 not guarantee the correct downbeat, meter, or tempo of every recording. Preview
 and adjust the excerpt/tempo, especially for intros, live versions, or jazz.
+
+### Dance failed, audio was silent, or the UI stayed in Dancing
+
+Refresh the page, support the lamp's head/arms, then use **Load dance update**.
+The reliability fix requires backend protocol version **2**; version 1 is
+detected and blocked until the operator confirms a restart. The new frontend is
+served already, but changing Python files does not update the running process.
+Do not restart an unsupported lamp or clear an emergency stop without inspection.
+
+The live log showed the event bus cancelling the behavior subscriber after
+30 seconds. Entry to neutral and the countdown were inside that same handler,
+so the handler could not finish a full 30-second dance. The fix acknowledges
+admission promptly, then waits separately for the matching motion result.
+It does **not** raise the global event-bus timeout or the motor limits.
+
+Completion, motor errors, missing audio readiness, timeouts, lost connections,
+and Stop now settle the playback state and release its UI ownership. The real
+controller checks final neutral before marking completion. Failures cancel
+remaining commands without a recovery movement, releasing torque, or resetting
+safety. A second bug where Stop tried to update a nonexistent Teach playback
+record is also fixed. The UI shows the underlying failure and permits a fresh
+preview after cleanup, rather than staying in Dancing.
+
+The browser must unlock audio, schedule the excerpt, and acknowledge the
+matching countdown before the dance body can begin. Suspended/blocked audio or
+a missed deadline fails visibly and cancels playback. The audio-ready check
+confirms browser scheduling, **not** that the laptop speakers are audible:
+use **Test laptop audio** to check the physical output. The UI names the output,
+provides a volume control, and clearly distinguishes an attached song from the
+default metronome. Real song files are still not bundled.
+
+Verified with the real web/behavior/event-bus stack and fake motors, including
+an actual 35-second test with a 30-second body under the original 30-second bus
+timeout. No physical rehearsal or automatic restart was performed. The live
+read-only checks still found version 1, no active movement, factory idle off,
+and motor torque off. Its emergency stop was left untouched.
 
 ### If you previously saw “405 Method Not Allowed”
 
@@ -130,7 +170,7 @@ Supervise the first physical rehearsal with an unobstructed movement envelope.
 ## Source, deployment, and reproducible checks
 
 The live runtime source is `/home/lelamp/lelamp-hackathon-2026`, on its local
-`guitarra-beat-matched-dances` branch. Its source changes are preserved here in
+`guitarra-fix-dance-lifecycle-audio` branch. Its source changes are preserved here in
 [runtime-patches/teaching-ui.patch](runtime-patches/teaching-ui.patch), now
 including both Teach and Dance. This targets original runtime commit `2fb7457`;
 do not reapply it to the already-patched lamp. For another compatible checkout,
@@ -160,8 +200,10 @@ test this addition; the running lamp was last checked stationary with idle off.
 Runtime backend checks:
 
 ```sh
-.venv/bin/python -m pytest tests/unit/test_dancing.py tests/unit/test_teaching.py \
+.venv/bin/python -m pytest tests/unit/test_dancing.py tests/unit/test_dance_lifecycle.py tests/unit/test_teaching.py \
   tests/unit/test_idle_route.py tests/unit/test_sdk_gateway.py tests/unit/test_robot_registry.py -q
+DANCE_REALTIME_TEST=1 .venv/bin/python -m pytest \
+  tests/unit/test_dance_lifecycle.py::test_full_30_second_dance_survives_default_bus_timeout -q
 node tests/dancing_dom_smoke.cjs /path/to/node_modules/jsdom
 node tests/teaching_dom_smoke.cjs /path/to/node_modules/jsdom
 ```
@@ -172,6 +214,10 @@ stripping: `node --experimental-strip-types --test tests/*.test.mjs` from the
 frontend directory. `npm run build` type-checks and builds production assets.
 The guitarra regression suite is `python3 -m unittest discover -s tests`.
 
-Verification on 2026-09-19: all 251 runtime unit tests passed (`tests/unit`),
-28 frontend tests passed, both React DOM interaction checks passed, production
-build passed, and all 45 guitarra tests passed. No hardware rehearsal is claimed.
+Latest verification on 2026-09-19: **266 runtime unit tests passed** (`tests/unit`),
+with the opt-in real-time test separately passing. All **31 frontend tests**,
+both React DOM interaction checks, the production build, and all **45 guitarra
+tests** passed. The live GET-only legacy probe verified that the new React UI
+blocks playback against the running version-1 backend and offers its update.
+The simulated UI checks also cover audio-ready failure, completion/error exits,
+Stop, and the emergency-stop gate. No hardware rehearsal is claimed.
