@@ -1,0 +1,12 @@
+{
+  "envelope_id": "simulation-only-v1",
+  "robot_id": "simulation",
+  "calibration_id": "not-a-device-calibration",
+  "baseline": {"base_yaw": 0, "base_pitch": 0, "elbow_pitch": 0, "wrist_roll": 0, "wrist_pitch": 0},
+  "offset_limits": {"base_yaw": [-6,6], "base_pitch": [-2,2], "elbow_pitch": [-2,2], "wrist_roll": [-3,3], "wrist_pitch": [-2,2]},
+  "dynamics": {"base_yaw": [8,32,200], "base_pitch": [8,32,200], "elbow_pitch": [8,32,200], "wrist_roll": [8,32,200], "wrist_pitch": [8,32,200]},
+  "partner_sign": 1,
+  "bow_sign": 1,
+  "hardware_verified": false,
+  "verification_runs": []
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "restrained",
+  "status": "candidate; not physically verified",
+  "reference_hypothesis": "Sustained partner attention and smaller supporting motion; see VISUAL_FINDINGS.md",
+  "yaw_amplitude": 1.0,
+  "roll_amplitude": 0.6,
+  "head_amplitude": 0.4,
+  "waist_amplitude": 0.8,
+  "elbow_amplitude": 0.6,
+  "partner_offset": 3.0,
+  "groove_period_beats": 8.0,
+  "head_phase_beats": 1.0,
+  "support_scale": 0.25
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "accented",
+  "status": "candidate; not physically verified",
+  "reference_hypothesis": "Greater phrase contrast with a distinct quiet solo section; see VISUAL_FINDINGS.md",
+  "yaw_amplitude": 2.0,
+  "roll_amplitude": 1.2,
+  "head_amplitude": 0.6,
+  "waist_amplitude": 1.6,
+  "elbow_amplitude": 1.0,
+  "partner_offset": 3.0,
+  "groove_period_beats": 4.0,
+  "head_phase_beats": 1.0,
+  "support_scale": 0.25
+}
