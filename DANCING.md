@@ -98,6 +98,30 @@ timeout and motor limits were not raised. Final neutral is checked before succes
 Errors and Stop cancel commands without releasing torque, clearing safety, or
 scheduling an automatic recovery move.
 
+### If the saved WAV opens but Start is disabled
+
+Chromium at a 44.1 kHz output rate decoded the exact 30-second/48 kHz WAV as
+**29.99997732426304 seconds** (1,322,999 frames). The original strict duration
+check rejected that one-frame rounding loss with “Audio needs at least 30 seconds,”
+leaving no loaded clip and Start disabled. A normal audio player still played it.
+
+The frontend now adds silence only for a resampling gap of at most one millisecond,
+giving subsequent checks and playback an exact 30-second buffer without changing
+any existing sample or motor timing. Genuinely short files still fail. Refresh;
+no robot restart is needed. Text beneath Start now names its blocking condition,
+and **Retry saved audio** retries a failed load without restarting anything.
+
+The real-Chromium regression uses the actual five WAV files at 44.1 and 48 kHz,
+clicks Prepare → Start, verifies 30-second Web Audio scheduling and acknowledgement,
+and clicks Stop. All robot APIs are intercepted and browser output is muted; this
+tests real decoding and the UI, not physical motor tracking or speaker audibility.
+
+After deployment, a separate operator-started Waterloo run was observed through
+read-only status checks progressing from `playing` to `completed`, with
+`audio_mode: laptop_file`, `audio_ready: true`, and no backend error. The agent
+did not issue its Start or any movement command. Readiness confirms browser
+scheduling, not acoustic audibility at the listener.
+
 ### If you previously saw “405 Method Not Allowed”
 
 Refresh the dashboard to load the corrected frontend. The older robot backend
@@ -196,7 +220,7 @@ Supervise the first physical rehearsal with an unobstructed movement envelope.
 ## Source, deployment, and reproducible checks
 
 The live runtime source is `/home/lelamp/lelamp-hackathon-2026`, on its local
-`guitarra-stored-dance-audio` branch. Its source changes are preserved here in
+`guitarra-dance-start-readiness` branch. Its source changes are preserved here in
 [runtime-patches/teaching-ui.patch](runtime-patches/teaching-ui.patch), now
 including both Teach and Dance. This targets original runtime commit `2fb7457`;
 do not reapply it to the already-patched lamp. For another compatible checkout,
@@ -233,6 +257,8 @@ DANCE_REALTIME_TEST=1 .venv/bin/python -m pytest \
 node tests/dancing_dom_smoke.cjs /path/to/node_modules/jsdom
 node tests/dancing_storage_dom_smoke.cjs /path/to/node_modules/jsdom /path/to/node_modules/fake-indexeddb
 node tests/dancing_audio_assets_smoke.cjs --live
+node tests/dancing_audio_browser_smoke.cjs /path/to/node_modules/playwright-core
+DANCE_AUDIO_RATE=48000 node tests/dancing_audio_browser_smoke.cjs /path/to/node_modules/playwright-core
 node tests/teaching_dom_smoke.cjs /path/to/node_modules/jsdom
 ```
 
@@ -242,7 +268,7 @@ stripping: `node --experimental-strip-types --test tests/*.test.mjs` from the
 frontend directory. `npm run build` type-checks and builds production assets.
 The guitarra regression suite is `python3 -m unittest discover -s tests`.
 
-Latest stored-audio checks on 2026-09-19: **37 frontend tests**, the production
+Latest stored-audio checks on 2026-09-19: **39 frontend tests**, the production
 build, React Teach/Dance/storage interaction checks, the live non-moving Prepare
 probe, and all **45 guitarra tests** passed. The storage check includes transaction
 abort/replacement, refresh/remount, selected-song re-click, default preset loading,
