@@ -1,110 +1,209 @@
-"""Guitarra web console — single-arm, tap-only, REAL hardware.
+"""Single-arm tap console: plan -> supervised play/record -> review -> approve.
 
-Flow: prompt -> Baseten converts it to a note plan (shown first) -> operator
-hits Play -> the arm taps the keys for real. No plucking exists on this rig.
+Loopback only. Startup/page loads open no devices and make no model requests.
+Play requires an already-running browser microphone and per-take consent. No
+camera, pluck arm, unrestricted model paths, or automatic physical repetitions.
 
-The serial port is opened per play and released after, so the keyframe GUI
-(app.py) can be used between plays — but not DURING one (port is exclusive).
-
-Run:  uv run --no-project --with fastapi --with "uvicorn" --with pyserial \
-          python webapp.py --port 8787
-Needs BASETEN_API_KEY in guitar/.env (or repo .env) for planning.
+Run from the repository root:
+  guitar/.venv/bin/python arm_controller/webapp.py --port 8788
 """
+from __future__ import annotations
+
+import hashlib
 import json
-import re
+import os
+import secrets
 import sys
 import threading
+import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))                  # fret.py / app.py
-sys.path.insert(0, str(HERE.parent / "guitar"))  # model.baseten
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "guitar"))
 
-import calibration  # noqa: E402
-from fret import FretArm, load_grid, STRING_NOTES, MAX_FRET  # noqa: E402
-from model.baseten import BasetenClient, BasetenError, load_env  # noqa: E402
+import calibration
+import fret
+from model.audio import AUDIO_MODELS, DEFAULT_AUDIO_MODEL
+from model.baseten import DEFAULT_MODEL, BasetenError, load_env
+from rehearsal import (
+    MAX_WAV_BYTES,
+    CaptureComplete,
+    CaptureStart,
+    PartialCapture,
+    RehearsalError,
+    RehearsalManager,
+)
+from tap_plans import (
+    MAX_ATTEMPTS,
+    MAX_CAPTURE_SECONDS,
+    MAX_NOTES,
+    MAX_PLAY_SECONDS,
+    MAX_TAKE_NOTES,
+    Consent,
+    StrictModel,
+    TapPlan,
+    arrange,
+    key_context,
+)
 
-MAX_NOTES = 64
-GAP_S = 0.25
-
-# Fretted pitch table: tap-only rig — open strings can't sound, so the whole
-# instrument is exactly the 18 recorded keys.
-_SEMIS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-
-
-def _pitch(string: int, fret: int) -> str:
-    name = STRING_NOTES[string]
-    idx = _SEMIS.index(name[:-1]) + int(name[-1]) * 12 + fret
-    return f"{_SEMIS[idx % 12]}{idx // 12}"
-
-
-PLAYABLE = {(s, f): _pitch(s, f) for s in range(1, 7) for f in range(1, MAX_FRET + 1)}
-
-PLAN_SYSTEM = f"""You arrange music for a one-armed robot guitarist that can ONLY
-tap-sound these 18 keys (string, fret) -> pitch:
-{json.dumps({f"s{s}f{f}": p for (s, f), p in sorted(PLAYABLE.items())})}
-Strings: 1 = high E ... 6 = low E. Frets 1-3 only. Open strings CANNOT sound
-(tap-only, no plucking). Notes are sequential taps — no chords, no sustain.
-
-Given the user's request (a song name, a melody description, or a pasted song
-sheet / tab), produce the best playable arrangement: transpose or substitute
-the nearest available pitch when the original note isn't in the 18-key set.
-At most {MAX_NOTES} notes. Reply with ONLY a JSON object, no prose:
-{{"title": "<short name>", "notes": [{{"string": 1-6, "fret": 1-3}}, ...]}}"""
+SESSION_TOKEN = secrets.token_urlsafe(32)
+STATIC = HERE / "static"
+RUN_ROOT = HERE.parent / "guitar" / "runs" / "tap_rehearsal"
+_plan_lock = threading.Lock()
 
 
-class PlanReq(BaseModel):
-    prompt: str = Field(min_length=1, max_length=8000)
-
-
-class NoteReq(BaseModel):
-    string: int = Field(ge=1, le=6)
-    fret: int = Field(ge=1, le=MAX_FRET)
-
-
-class PlayReq(BaseModel):
-    notes: list[NoteReq] = Field(min_length=1, max_length=MAX_NOTES)
-    gap_s: float = Field(default=GAP_S, ge=0.0, le=2.0)
-
-
-state = {"playing": False, "index": -1, "total": 0, "error": None, "stop": False}
-_state_lock = threading.Lock()
-
-
-def _play_thread(notes, gap_s):
-    import time
+def read_registry():
+    """Read a current local snapshot; no old-map fallback, guessed poses, or device I/O."""
     try:
-        arm = FretArm()
-    except Exception as e:
-        with _state_lock:
-            state.update(playing=False, error=f"arm unavailable: {e}")
-        return
+        raw = fret.KEYFRAMES_PATH.read_bytes()
+        calibration_bytes = (HERE / "calibration_arm2.json").read_bytes()
+        entries = json.loads(raw)
+        # Reject coercion/incomplete poses BEFORE the historical loader converts counts.
+        if not isinstance(entries, list):
+            raise TypeError("Keypoints must be a list")
+        for entry in entries:
+            positions = entry["positions"]
+            if (set(positions) != {str(s) for s in fret.MOTOR_IDS}
+                    or any(type(v) is not int or not 0 <= v <= 4095 for v in positions.values())):
+                raise ValueError("Keypoints must contain complete raw body-joint poses only")
+        grid = fret.load_grid(entries=entries)
+        cells, rest, warnings = grid
+        if not cells or set(rest) != set(fret.MOTOR_IDS):
+            raise ValueError("Record a rest pose and the needed keys first")
+        signature = b"rest_hub-v1:400:1200:0.12:30:4.0"
+        fingerprint = hashlib.sha256(raw + b"\0" + calibration_bytes + signature).hexdigest()
+        return {"keys": set(cells), "grid": grid, "fingerprint": fingerprint, "warnings": warnings}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        raise RehearsalError("No valid current keypoint grid/rest pose. Calibrate first; "
+                             "the backup/old fret map is not used automatically.") from None
+
+
+def execute_take(plan, registry, stop_event, emit):
+    """Local execution only. No cloud call, arbitrary path, or model timing in the servo loop."""
+    if stop_event.is_set():
+        return False
+    if read_registry()["fingerprint"] != registry["fingerprint"]:
+        raise RehearsalError("Calibration changed before connection")
+    deadline = time.monotonic() + MAX_PLAY_SECONDS
+    arm = fret.FretArm(grid=registry["grid"])
     try:
-        for i, (s, f) in enumerate(notes):
-            with _state_lock:
-                if state["stop"]:
-                    break
-                state["index"] = i
-            arm.tap_key(s, f)
-            if gap_s:
-                time.sleep(gap_s)
-        arm.rest()
-    except Exception as e:
-        with _state_lock:
-            state["error"] = str(e)
+        for index, note in enumerate(plan.notes):
+            if stop_event.is_set():
+                return False
+            emit({"event": "note_start", "index": index, "string": note.string, "fret": note.fret})
+            result = arm.tap_key(note.string, note.fret, deadline=deadline)
+            emit({"event": "note_end", "index": index, "result": result})
+            if index < len(plan.notes) - 1 and stop_event.wait(note.pause_ms / 1000):
+                return False
+        return not stop_event.is_set()
     finally:
-        arm.close()  # torque stays ON so the arm holds position
-        with _state_lock:
-            state.update(playing=False, index=-1)
+        # Every successful tap already lifted to rest. No extra homing on faults,
+        # Stop, exit, or disconnect. The operator must support the body for this.
+        # Never touch motor 12 or reassert grip while waiting for a cloud model.
+        arm.close(torque_off=True)
 
 
-app = FastAPI()
+manager = RehearsalManager(RUN_ROOT, registry=read_registry, execute=execute_take,
+                           lock=calibration.ownership_lock,
+                           calibration_active=calibration.session_active)
+calibration.set_play_guard(lambda: manager.busy)
+
+app = FastAPI(docs_url=None, redoc_url=None)
 app.include_router(calibration.router)
-calibration.set_play_guard(lambda: state["playing"])
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.middleware("http")
+async def local_boundary(request: Request, call_next):
+    """Single-user loopback boundary, including calibration and binary WAV mutations."""
+    try:
+        host = urlsplit("http://" + request.headers.get("host", ""))
+        valid_host = (host.hostname in {"127.0.0.1", "localhost"}
+                      and not (host.username or host.password or host.path or host.query or host.fragment)
+                      and (host.port is None or 1 <= host.port <= 65535))
+    except ValueError:
+        valid_host = False
+    if not valid_host:
+        return JSONResponse({"detail": "Loopback Host required"}, status_code=403)
+    origin = request.headers.get("origin")
+    if origin and origin != f"{request.url.scheme}://{request.headers.get('host')}":
+        return JSONResponse({"detail": "Same-origin requests only"}, status_code=403)
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        token = request.headers.get("x-session-token", "")
+        if not token.isascii() or not secrets.compare_digest(token, SESSION_TOKEN):
+            return JSONResponse({"detail": "Reload this local console for its session token"}, status_code=403)
+        is_audio = request.url.path.endswith(("/audio", "/partial-audio"))
+        media_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+        if media_type != ("audio/wav" if is_audio else "application/json"):
+            return JSONResponse({"detail": "Expected WAV audio or JSON mutation"}, status_code=415)
+        limit = MAX_WAV_BYTES if is_audio else 65536
+        try:
+            length = int(request.headers.get("content-length", "0"))
+            if length < 0:
+                raise ValueError("Negative length")
+            if length > limit:
+                return JSONResponse({"detail": "Request too large"}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)
+        # Bound chunked requests as well as Content-Length. Starlette caches this
+        # body for the downstream parser; it is never logged or put in model text.
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > limit:
+                return JSONResponse({"detail": "Request too large"}, status_code=413)
+            body.extend(chunk)
+        request._body = bytes(body)
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self)"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; media-src 'self' blob:; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+    return response
+
+
+@app.exception_handler(RehearsalError)
+async def admission_error(_request, exc):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+class PlanReq(StrictModel):
+    prompt: str = Field(min_length=1, max_length=8000)
+    allow_inference: Consent
+
+
+class PrepareReq(StrictModel):
+    plan: TapPlan
+    parent_attempt_id: str | None = Field(default=None, min_length=36, max_length=36)
+    source_attempt_id: str | None = Field(default=None, min_length=36, max_length=36)
+    session_id: str | None = Field(default=None, min_length=36, max_length=36)
+    title: str = Field(default="Rehearsal", min_length=1, max_length=80)
+    allow_audio_upload: Consent
+    allow_revision_inference: Consent
+    supervised_and_supported: Consent
+
+
+class PlayReq(CaptureStart):
+    attempt_id: str = Field(min_length=36, max_length=36)
+
+
+class AttemptReq(StrictModel):
+    attempt_id: str = Field(min_length=36, max_length=36)
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC / "index.html")
 
 
 @app.get("/calibrate")
@@ -115,241 +214,128 @@ def calibrate_page():
 @app.get("/api/bootstrap")
 def bootstrap():
     try:
-        cells, _, _ = load_grid()
-    except (ValueError, FileNotFoundError):
-        # keypoints cleared / not yet recorded — console loads, playing won't work
-        return {"keys": [], "max_notes": MAX_NOTES, "hardware": "real",
-                "plucking": False, "warning": "no keypoints recorded — calibrate first"}
-    return {"keys": [{"string": s, "fret": f, "pitch": PLAYABLE[(s, f)]}
-                     for (s, f) in sorted(cells)],
-            "max_notes": MAX_NOTES, "hardware": "real", "plucking": False}
+        registry = read_registry()
+        keys, warning = key_context(registry["keys"]), None
+    except RehearsalError as exc:
+        registry, keys, warning = None, [], str(exc)
+    audio_model = os.environ.get("BASETEN_AUDIO_MODEL") or DEFAULT_AUDIO_MODEL
+    return {"session_token": SESSION_TOKEN, "keys": keys, "warning": warning,
+            "keypoint_warnings": registry["warnings"] if registry else [],
+            "max_notes": MAX_NOTES, "max_take_notes": MAX_TAKE_NOTES, "max_attempts": MAX_ATTEMPTS,
+            "max_capture_seconds": MAX_CAPTURE_SECONDS, "hardware": "real_single_tap_arm",
+            "camera": False, "plucking": False, "auto_replay": False,
+            "path_profiles": ["rest_hub"], "shortcuts_qualified": False,
+            "key_present": bool(os.environ.get("BASETEN_API_KEY") or os.environ.get("BASETEN")),
+            "planner_model": os.environ.get("BASETEN_MODEL") or DEFAULT_MODEL,
+            "audio_model": audio_model, "audio_model_supported": audio_model in AUDIO_MODELS,
+            "audio_endpoint_status": "unverified; last recorded live probe timed out",
+            "active_attempt": manager.active()}
 
 
 @app.post("/api/plan")
 def plan(req: PlanReq):
+    registry = read_registry()
+    if manager.busy:
+        raise RehearsalError("Finish the current take before requesting another arrangement")
+    for name in ("BASETEN_API_KEY", "BASETEN"):
+        secret = os.environ.get(name)
+        if secret and secret in req.prompt:
+            raise HTTPException(400, "Do not include credentials in prompts")
+    if not _plan_lock.acquire(blocking=False):
+        raise RehearsalError("An arrangement request is already pending; no duplicate inference")
     try:
-        client = BasetenClient(effort="low", timeout_s=120)
-        resp = client.chat(
-            [{"role": "system", "content": PLAN_SYSTEM},
-             {"role": "user", "content": req.prompt}],
-            response_format={"type": "json_object"})
-        raw = resp["choices"][0]["message"]["content"]
-    except BasetenError as e:
-        raise HTTPException(502, f"Baseten: {e}")
-    except (KeyError, IndexError, TypeError):
-        raise HTTPException(502, "Baseten returned an unexpected response shape")
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        raise HTTPException(502, "model reply contained no JSON object")
-    try:
-        data = json.loads(m.group(0))
-        notes = [(int(n["string"]), int(n["fret"])) for n in data["notes"]][:MAX_NOTES]
-    except (ValueError, KeyError, TypeError):
-        raise HTTPException(502, "model JSON did not match the expected schema")
-    bad = [n for n in notes if n not in PLAYABLE]
-    if bad or not notes:
-        raise HTTPException(502, f"model planned unplayable keys: {bad or 'none at all'}")
-    return {"title": str(data.get("title", "untitled"))[:80], "model": client.model,
-            "notes": [{"string": s, "fret": f, "pitch": PLAYABLE[(s, f)]} for s, f in notes]}
+        return arrange(req.prompt, registry["keys"])
+    except (BasetenError, ValueError):
+        raise HTTPException(502, "Baseten planning unavailable or invalid response; no automatic retry") from None
+    finally:
+        _plan_lock.release()
+
+
+@app.post("/api/attempts")
+def prepare(req: PrepareReq):
+    if not (os.environ.get("BASETEN_API_KEY") or os.environ.get("BASETEN")):
+        raise RehearsalError("Configure the server-side Baseten credential before a recorded take")
+    if (os.environ.get("BASETEN_AUDIO_MODEL") or DEFAULT_AUDIO_MODEL) not in AUDIO_MODELS:
+        raise RehearsalError("Select a supported audio evaluator; the Kimi planner cannot receive this WAV")
+    return manager.create(req.plan, parent_attempt_id=req.parent_attempt_id,
+                          source_attempt_id=req.source_attempt_id, session_id=req.session_id, title=req.title)
 
 
 @app.post("/api/play")
 def play(req: PlayReq):
-    if calibration.session_active():
-        raise HTTPException(409, "calibration holds the serial port — "
-                                 "disconnect on /calibrate first")
-    with _state_lock:
-        if state["playing"]:
-            raise HTTPException(409, "already playing — stop it first")
-        state.update(playing=True, index=-1, total=len(req.notes), error=None, stop=False)
-    notes = [(n.string, n.fret) for n in req.notes]
-    threading.Thread(target=_play_thread, args=(notes, req.gap_s), daemon=True).start()
-    return {"started": True, "total": len(notes)}
+    capture = CaptureStart.model_validate(req.model_dump(exclude={"attempt_id"}))
+    return manager.start(req.attempt_id, capture)
 
 
 @app.post("/api/stop")
-def stop():
-    with _state_lock:
-        state["stop"] = True
-    return {"stopping": True}
+def stop(req: AttemptReq):
+    return manager.stop(req.attempt_id)
 
 
 @app.get("/api/status")
 def status():
-    with _state_lock:
-        return dict(state)
+    return {"active_attempt": manager.active()}
 
 
-PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Guitarra</title>
-<style>
-  /* exactly three colors, flat */
-  :root { --paper:#F5F1E8; --ink:#1B1B1B; --accent:#D95D39; }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:var(--paper); color:var(--ink);
-         font-family:"SF Mono",ui-monospace,Menlo,monospace;
-         min-height:100vh; display:flex; flex-direction:column;
-         align-items:center; padding:9vh 20px 40px; }
-  h1 { font-size:28px; letter-spacing:6px; }
-  .sub { margin-top:6px; font-size:12px; letter-spacing:2px; }
-  main { width:100%; max-width:620px; margin-top:42px; }
-  textarea { width:100%; height:110px; resize:vertical; padding:14px;
-             font:inherit; font-size:15px; color:var(--ink);
-             background:var(--paper); border:2px solid var(--ink); outline:none; }
-  textarea:focus { border-color:var(--accent); }
-  .examples { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-  .examples button { font:inherit; font-size:11px; padding:6px 10px; cursor:pointer;
-                     background:var(--paper); color:var(--ink); border:1px solid var(--ink); }
-  .examples button:hover { border-color:var(--accent); color:var(--accent); }
-  .actions { margin-top:18px; display:flex; gap:10px; justify-content:center; }
-  .btn { font:inherit; font-size:14px; letter-spacing:2px; padding:12px 26px;
-         cursor:pointer; border:2px solid var(--ink); background:var(--paper); color:var(--ink); }
-  .btn.primary { background:var(--accent); border-color:var(--accent); color:var(--paper); }
-  .btn:disabled { opacity:.4; cursor:default; }
-  #status { margin-top:16px; text-align:center; font-size:12px; min-height:16px; }
-  #status.err { color:var(--accent); }
-  #plan { margin-top:34px; display:none; }
-  #plan h2 { font-size:15px; letter-spacing:2px; border-bottom:2px solid var(--ink);
-             padding-bottom:8px; }
-  .notes { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
-  .note { border:1px solid var(--ink); padding:7px 9px; font-size:12px; text-align:center; }
-  .note b { display:block; font-size:14px; }
-  .note.now { background:var(--accent); border-color:var(--accent); color:var(--paper); }
-  .note.done { border-color:var(--accent); color:var(--accent); }
-  .steps { display:flex; justify-content:center; gap:28px; margin-bottom:30px;
-           font-size:12px; letter-spacing:2px; }
-  .step { opacity:.35; }
-  .step.done { opacity:1; }
-  .step.on { opacity:1; color:var(--accent); }
-  #now { display:none; text-align:center; margin-top:24px; }
-  #now .pitch { font-size:46px; font-weight:bold; color:var(--accent); line-height:1; }
-  #now .where { font-size:13px; letter-spacing:2px; margin-top:6px; }
-  .bar { height:14px; border:2px solid var(--ink); margin-top:16px; }
-  .bar div { height:100%; width:0; background:var(--accent); }
-  #count { font-size:12px; margin-top:6px; }
-</style></head><body>
-<h1>GUITARRA</h1>
-<div class="sub">one arm &middot; eighteen keys &middot; tap only &middot; <a href="/calibrate" style="color:var(--accent)">calibrate</a></div>
-<main>
-  <div class="steps">
-    <span class="step on" id="st1">1 PROMPT</span>
-    <span class="step" id="st2">2 NOTES</span>
-    <span class="step" id="st3">3 TAP</span>
-  </div>
-  <textarea id="prompt" placeholder="tell it what to play&hellip; a song, a melody, or paste a song sheet"></textarea>
-  <div class="examples">
-    <button data-x="Play Hot Cross Buns">hot cross buns</button>
-    <button data-x="Play the hook of Seven Nation Army">seven nation army</button>
-    <button data-x="Play an ascending then descending scale across all six strings">up-down scale</button>
-    <button data-x="Song sheet:&#10;e|--1--3--1--|&#10;B|--------3--|&#10;G|--2--------|">paste a tab</button>
-  </div>
-  <div class="actions">
-    <button class="btn primary" id="convert">CONVERT TO NOTES</button>
-  </div>
-  <div id="status"></div>
-  <section id="plan">
-    <h2 id="title"></h2>
-    <div id="now">
-      <div class="pitch"></div>
-      <div class="where"></div>
-      <div class="bar"><div id="fill"></div></div>
-      <div id="count"></div>
-    </div>
-    <div class="notes" id="notes"></div>
-    <div class="actions">
-      <button class="btn primary" id="play">TAP IT OUT</button>
-      <button class="btn" id="stop" disabled>STOP</button>
-    </div>
-  </section>
-</main>
-<script>
-const $ = id => document.getElementById(id);
-let planNotes = [], poller = null, lastIdx = -1;
-document.querySelectorAll('.examples button').forEach(b =>
-  b.onclick = () => { $('prompt').value = b.dataset.x.replace(/&#10;/g,'\\n'); });
-const say = (msg, err) => { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; };
-const setStep = n => [1,2,3].forEach(i =>
-  $('st'+i).className = 'step' + (i === n ? ' on' : i < n ? ' done' : ''));
-
-$('convert').onclick = async () => {
-  const prompt = $('prompt').value.trim();
-  if (!prompt) return say('write something first', true);
-  $('convert').disabled = true; setStep(1); say('asking the model\\u2026');
-  try {
-    const r = await fetch('/api/plan', {method:'POST', headers:{'Content-Type':'application/json'},
-                                        body: JSON.stringify({prompt})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || r.status);
-    planNotes = d.notes; lastIdx = -1;
-    $('title').textContent = d.title + '  \\u00b7  ' + d.notes.length + ' notes';
-    $('notes').innerHTML = d.notes.map(n =>
-      `<div class="note"><b>${n.pitch}</b>s${n.string} f${n.fret}</div>`).join('');
-    $('now').style.display = 'none'; $('fill').style.width = '0';
-    $('plan').style.display = 'block'; setStep(2);
-    say('review the notes, then tap it out');
-  } catch (e) { say('plan failed: ' + e.message, true); }
-  $('convert').disabled = false;
-};
-
-$('play').onclick = async () => {
-  $('play').disabled = true; $('stop').disabled = false;
-  setStep(3); lastIdx = -1;
-  $('now').style.display = 'block'; $('fill').style.width = '0';
-  document.querySelector('#now .pitch').textContent = '\\u2026';
-  document.querySelector('#now .where').textContent = 'moving to the first key';
-  $('count').textContent = ''; say('');
-  try {
-    const r = await fetch('/api/play', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({notes: planNotes.map(n => ({string:n.string, fret:n.fret}))})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || r.status);
-    poller = setInterval(poll, 300);
-  } catch (e) {
-    say('play failed: ' + e.message, true);
-    $('play').disabled = false; $('stop').disabled = true; setStep(2);
-  }
-};
-
-$('stop').onclick = () => { fetch('/api/stop', {method:'POST'}); say('stopping\\u2026'); };
-
-async function poll() {
-  const s = await (await fetch('/api/status')).json();
-  if (s.playing && s.index >= 0) lastIdx = s.index;
-  const doneUpTo = s.playing ? s.index : (s.error || s.stop ? lastIdx + 1 : planNotes.length);
-  document.querySelectorAll('.note').forEach((el, i) => {
-    el.className = 'note' + (s.playing && i === s.index ? ' now' : i < doneUpTo ? ' done' : '');
-  });
-  if (s.playing && s.index >= 0) {
-    const n = planNotes[s.index];
-    document.querySelector('#now .pitch').textContent = n.pitch;
-    document.querySelector('#now .where').textContent =
-      'string ' + n.string + ' \\u00b7 fret ' + n.fret;
-    $('fill').style.width = ((s.index + 1) / s.total * 100) + '%';
-    $('count').textContent = 'note ' + (s.index + 1) + ' of ' + s.total;
-  }
-  if (!s.playing) {
-    clearInterval(poller); poller = null;
-    $('play').disabled = false; $('stop').disabled = true;
-    if (s.error) {
-      say('error: ' + s.error, true); setStep(2);
-    } else if (s.stop) {
-      say('stopped \\u2014 arm back at rest'); setStep(2);
-    } else {
-      $('fill').style.width = '100%';
-      document.querySelector('#now .pitch').textContent = '\\u2713';
-      document.querySelector('#now .where').textContent = 'all notes tapped';
-      $('count').textContent = planNotes.length + ' of ' + planNotes.length;
-      say('done \\u2014 arm back at rest');
-    }
-  }
-}
-</script></body></html>"""
+@app.get("/api/attempts/{attempt_id}")
+def attempt_status(attempt_id: str):
+    return manager.status(attempt_id)
 
 
-@app.get("/")
-def index():
-    return HTMLResponse(PAGE)
+@app.post("/api/attempts/{attempt_id}/heartbeat")
+def heartbeat(attempt_id: str):
+    return manager.heartbeat(attempt_id)
+
+
+@app.post("/api/attempts/{attempt_id}/partial-audio")
+async def partial_audio(attempt_id: str, request: Request):
+    header = request.headers.get("x-capture-metadata", "")
+    if len(header) > 2048:
+        raise HTTPException(400, "Capture metadata too large")
+    try:
+        metadata = PartialCapture.model_validate_json(header, strict=True)
+    except ValidationError:
+        raise HTTPException(400, "Partial capture metadata is required") from None
+    return await run_in_threadpool(manager.save_partial, attempt_id, metadata, await request.body())
+
+
+@app.get("/api/sessions")
+def sessions():
+    return {"sessions": manager.sessions()}
+
+
+@app.get("/api/sessions/{session_id}")
+def session_history(session_id: str):
+    return manager.history(session_id)
+
+
+@app.post("/api/sessions/{session_id}/preferred")
+def prefer_take(session_id: str, req: AttemptReq):
+    return manager.prefer(session_id, req.attempt_id)
+
+
+@app.get("/api/attempts/{attempt_id}/audio")
+def saved_audio(attempt_id: str, request: Request):
+    # The UI fetches with its token and creates a local blob URL. Do not expose
+    # private clips as embeddable unauthenticated cross-origin media URLs.
+    token = request.headers.get("x-session-token", "")
+    if not token.isascii() or not secrets.compare_digest(token, SESSION_TOKEN):
+        raise HTTPException(403, "This local session's token is required to read recordings")
+    return FileResponse(manager.saved_audio(attempt_id), media_type="audio/wav",
+                        filename=f"take-{attempt_id}.wav")
+
+
+@app.post("/api/attempts/{attempt_id}/audio")
+async def upload_audio(attempt_id: str, request: Request):
+    header = request.headers.get("x-capture-metadata", "")
+    if len(header) > 2048:
+        raise HTTPException(400, "Capture metadata too large")
+    try:
+        metadata = CaptureComplete.model_validate_json(header, strict=True)
+    except ValidationError:
+        raise HTTPException(400, "Complete, uninterrupted capture metadata is required") from None
+    body = await request.body()  # middleware enforces an actual streamed byte limit
+    return await run_in_threadpool(manager.accept_audio, attempt_id, metadata, body)
 
 
 if __name__ == "__main__":
@@ -358,8 +344,8 @@ if __name__ == "__main__":
     import uvicorn
 
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--port", type=int, default=8787)
-    a = ap.parse_args()
+    ap.add_argument("--port", type=int, default=8788)
+    args = ap.parse_args()
     load_env()
-    print(f"Guitarra tap console: http://127.0.0.1:{a.port} — REAL ARM", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=a.port, access_log=False, log_level="warning")
+    print(f"Guitarra tap/rehearsal console: http://127.0.0.1:{args.port} — REAL ARM, supervised only", flush=True)
+    uvicorn.run(app, host="127.0.0.1", port=args.port, access_log=False, log_level="warning")

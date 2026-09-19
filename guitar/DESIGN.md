@@ -4,6 +4,15 @@
 implementation evidence; [../AGENTS.md](../AGENTS.md) owns operator/gripper instructions.
 Historical painting, single-arm open-G, π0.5, and lamp/band designs are not this build plan.
 
+**Current operator-requested web milestone (pulled single-arm code):** only the existing
+working tap/fret arm (body IDs 7–11, tool gripper 12 never commanded) is active; the other
+arm is out of service. This is a subset of the same physical rig, **not** the historical
+open-G/π0.5 design and not permission to reactivate/add an arm. The supervised
+[web rehearsal](../arm_controller/REHEARSAL.md) implements browser capture → optional
+pretrained assessment → bounded proposed revision for that subset. Two-arm scheduling
+below remains a broader target, not a claim about the current tap UI. Status/physical
+and endpoint verification boundaries are in [STATUS.md](STATUS.md).
+
 ## 1. The product
 
 Use the **same physical two-arm guitar rig** with defined, qualified fret/press, release,

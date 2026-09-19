@@ -54,7 +54,29 @@ and can incur idle costs. No dedicated GPU has been provisioned for this managed
 Astra/Claude are alternatives, not assumed Baseten models. API keys stay in the shell or
 ignored secret files, never in docs, logs, screenshots, or model context.
 
-### Local web console (fake tools only)
+### Current single-arm tap/rehearsal web console
+
+```bash
+# From the repository root; no device or model access at startup:
+guitar/.venv/bin/python arm_controller/webapp.py --port 8788
+```
+
+Open **http://127.0.0.1:8788**. This is the pulled **real single-arm tap app**,
+not the older fake console below. See [arm_controller/REHEARSAL.md](../arm_controller/REHEARSAL.md)
+for browser mic consent, one bounded audio/model review, a proposed diff, and a
+separate operator-approved Play. No automatic physical replay or camera input.
+
+Current blockers: `arm_controller/keyframes_arm2.json` is empty, Inkling's last
+live audio probe timed out, and physical/thermal qualification remains unresolved.
+Do not restore old maps or infer readiness from offline checks. The new web executor
+releases **body-joint torque only** at disconnect before cloud waits—support the body;
+tool-gripper 12 is never commanded. New/offline checks:
+
+```bash
+guitar/.venv/bin/python -m pytest arm_controller/tests guitar/tests -q
+```
+
+### Older local web console (fake tools only, separate app)
 
 ```bash
 # From repository root; this leaves the parent shell's working directory unchanged.
@@ -96,8 +118,11 @@ Device access/media upload still require approval. Read [agent/README.md](agent/
 
 The normal path needs state/text plus available audio feedback, not a vision model. Current
 microphone code provides local heuristics. A separate [file-based evaluator](model/AUDIO.md)
-now provides explicit WAV upload and a bounded assessment interface, but its Inkling endpoint
-is still timing out. Capture/export, live assessment verification, and planner integration remain.
+provides explicit WAV upload and a bounded assessment interface, but its last Inkling probe
+timed out. The single-arm `arm_controller/` web app now wires browser capture/export and a
+bounded planner proposal to that adapter, with persistent session/audio/tuning history and
+operator-started Next Take. This is offline-tested, not live-qualified. The
+older CLI/fake orchestration still lacks that integration; live assessment verification remains.
 The configured Kimi planner cannot accept raw microphone audio. See
 [sense/README.md](sense/README.md). No training dataset is needed for the rehearsal loop.
 
