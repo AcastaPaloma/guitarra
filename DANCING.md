@@ -132,3 +132,7 @@ They cannot command hardware. Frontend unit tests use Node 22's TypeScript
 stripping: `node --experimental-strip-types --test tests/*.test.mjs` from the
 frontend directory. `npm run build` type-checks and builds production assets.
 The guitarra regression suite is `python3 -m unittest discover -s tests`.
+
+Verification on 2026-09-19: all 251 runtime unit tests passed (`tests/unit`),
+28 frontend tests passed, both React DOM interaction checks passed, production
+build passed, and all 45 guitarra tests passed. No hardware rehearsal is claimed.
