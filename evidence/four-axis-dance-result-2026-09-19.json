@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "trial": "four-axis-dance-01",
+  "started_utc": "2026-09-19T07:04:43.405862+00:00",
+  "result": {
+    "kind": "dance",
+    "joint": null,
+    "planned_seconds": 25.0,
+    "camera_log": "/tmp/guitarra-rehearsal-20260919/four-axis-dance-01/recording/camera-log.jsonl",
+    "started_wall_ns": 1789801483405862000,
+    "started_mono_ns": 451014325447208,
+    "status": "fault; hold and inspect",
+    "hardware_verified": false,
+    "run_id": "0c05e2136b044b9dbb1a2a0acaf2ab79",
+    "held_joint_guard": {
+      "joint": "elbow_pitch",
+      "reference": -77.43142144638404,
+      "maximum_drift": 0.75
+    },
+    "fault_reason": "held_joint_drift",
+    "error_type": "RuntimeError",
+    "cancellation_terminal_state": "canceled",
+    "ended_mono_ns": 451017831551833
+  },
+  "action_id": "sdk_act_456647f7546d46ff",
+  "before_positions": {
+    "base_pitch": -53.12664214398318,
+    "base_yaw": -4.474272930648766,
+    "elbow_pitch": -77.43142144638404,
+    "wrist_pitch": -14.914914914914917,
+    "wrist_roll": 2.6631853785900717
+  },
+  "fault_event": {
+    "mono_ns": 451017459990541,
+    "wall_ns": 1789801486540431000,
+    "type": "held_joint_guard_fault",
+    "data": {
+      "joint": "elbow_pitch",
+      "reference": -77.43142144638404,
+      "maximum_drift": 0.75,
+      "observed": -80.79800498753117
+    }
+  },
+  "elbow_observed_change": -3.3665835411471363,
+  "fault_after_trial_start_s": 3.134543333,
+  "cancellation_confirmed_after_fault_s": 0.371561292,
+  "post_fault_positions": {
+    "base_pitch": -53.12664214398318,
+    "base_yaw": -4.474272930648766,
+    "elbow_pitch": -80.79800498753117,
+    "wrist_pitch": -14.914914914914917,
+    "wrist_roll": 2.6631853785900717
+  },
+  "elbow_error_from_original_planned_baseline": -12.468827930174555,
+  "recording": {
+    "schema_version": 1,
+    "started_mono_ns": 451012134524416,
+    "started_wall_ns": 1789801481214924000,
+    "duration_requested_s": 45.0,
+    "clock": "observer time.monotonic_ns",
+    "camera_device": "0:none",
+    "camera_mirrored": null,
+    "mirroring_note": "Verify the selected camera visually for each setup",
+    "camera_latency_s": null,
+    "audio_latency_s": null,
+    "encoder_capture_time_available": false,
+    "motion_commands_sent": 0,
+    "camera_requested": true,
+    "audio_requested": false,
+    "camera_process_started_mono_ns": 451013097873791,
+    "camera_exit_code": 0,
+    "camera_encoded_frames": 1350,
+    "camera_capture_failed": false,
+    "ended_mono_ns": 451058930605583,
+    "samples": 192,
+    "failed_samples": 0,
+    "camera_verified": false
+  },
+  "dance_started": false,
+  "dance_completed": false,
+  "physical_contact_assessment": "Head appears lower/closer to base; monocular sampled view does not establish contact or calibrated clearance.",
+  "new_preflight_readonly_check": "rejects elbow_pitch outside existing target tolerance; no new motion submitted",
+  "media_published": false
+}

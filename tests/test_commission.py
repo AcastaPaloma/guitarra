@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from band.performance.composer import StageEnvelope
 from band.performance.primitives import JOINTS
-from band.rehearsal.commission import HeldJointGuard, build_probe, require_held_runtime
+from band.rehearsal.commission import HeldJointGuard, build_probe, require_held_runtime, require_stage_alignment
 from band.rehearsal.runner import SIMULATION_STAGE
 
 
@@ -91,6 +91,21 @@ class CommissionTests(unittest.TestCase):
             with self.assertRaises((RuntimeError, ValueError)):
                 guard.check({**positions, "elbow_pitch": offset})
         self.assertEqual(guard.reference, 0)
+
+    def test_dance_rejects_off_target_start_without_widening_runtime_tolerances(self):
+        info = {"positions": dict(self.stage.baseline), "target_tolerance": 2,
+                "target_tolerances": {"elbow_pitch": 10, "wrist_pitch": 3}}
+        require_stage_alignment(self.stage, info)
+        for joint, delta in (("elbow_pitch", -12.47), ("base_yaw", 2.01), ("wrist_pitch", 3.01)):
+            with self.assertRaisesRegex(ValueError, joint):
+                require_stage_alignment(self.stage, {**info, "positions": {**info["positions"], joint: delta}})
+        self.assertEqual(info["target_tolerances"]["elbow_pitch"], 10)
+
+    def test_dance_alignment_requires_finite_positive_runtime_tolerances(self):
+        for tolerance in (None, 0, -1, float("nan")):
+            with self.assertRaises(ValueError):
+                require_stage_alignment(self.stage, {"positions": dict(self.stage.baseline),
+                                                     "target_tolerance": tolerance})
 
 
 if __name__ == "__main__":

@@ -149,3 +149,42 @@ The SDK accepted the 25-second candidate upload without commanding motion.
 The current camera setup places a laptop close behind the head; its removal from
 the turning space was requested. No exaggerated-dance completion is claimed.
 The previous diagnostic evidence and unresolved elbow finding remain unchanged.
+
+
+## Larger dance attempt — canceled during entry
+
+After the user's “go”, `four-axis-dance-01` started at **07:04:43.405862 UTC**.
+The authored 25-second four-axis trajectory was unchanged from the prepared
+candidate; elbow target remained fixed at the original planned −68.329177.
+Action `sdk_act_456647f7546d46ff` passed the SDK's entry/path collision checks.
+
+Before the dance began, elbow feedback changed from −77.431421 to −80.798005
+(**−3.366584 units**). The 0.75-unit held-joint guard triggered about 3.135 seconds
+after trial start. SDK cancellation was confirmed about 0.372 seconds after the
+fault observation. A later authenticated SDK read showed the same elbow angle;
+torque remained enabled, no action or idle was playing. The head appeared lower
+and closer to the base; this camera view cannot certify contact or clearance.
+
+The guard is sampled over HTTP. Its 0.75 threshold is a detection threshold,
+**not a physical excursion bound**: the first changed sample was already 3.37
+units away. There was no completed exaggerated dance, and no retry followed.
+The full 45-second video contains 1,350 encoded frames and the post-fault hold.
+
+Source reinspection confirmed `safe_motion.py::with_entry` and
+`runtime.py::_play_prepared_motion` construct an entry from current feedback to
+the first authored pose. Thus a fixed elbow target in the authored dance does
+not mean a fixed elbow target during entry. The failure occurred there; it is
+not evidence that the new yaw/roll amplitude caused the drop. Mechanical/load,
+servo control, and entry-command effects have not been separated. No runtime
+entry bypass, gain adjustment, tolerance expansion or sagged-baseline reset was
+used to make this pass.
+
+The resulting elbow posture is 12.468828 units from the original planned target,
+outside the runtime's unchanged 10-unit tolerance. Added
+`commission.py::require_stage_alignment` to reject any new commissioning probe
+whose starting pose is outside the existing per-joint SDK tolerances. A read-only
+check of the live SDK response correctly rejected this posture; passing this
+check would still not certify safe or accurate motion. The suite now has 38
+passing checks. Further motion needs diagnosis of the elbow/entry behavior and
+physical clearance, not a looser guard. Evidence is saved in
+[evidence/four-axis-dance-result-2026-09-19.json](evidence/four-axis-dance-result-2026-09-19.json).

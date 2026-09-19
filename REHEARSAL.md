@@ -179,3 +179,12 @@ The first candidate was uploaded and validated by the installed SDK as clip
 `ecae4c75e180c576e4440a05bf975b9afd0948ef816901d15c1e26f6cf5d6586`).
 At preparation time no playback was submitted because a laptop was close behind
 the head. Full physical clearance is required before executing the command.
+
+
+The subsequent authorized `four-axis-dance-01` attempt was canceled by the elbow
+drift guard during SDK entry, before the dance started. **Do not repeat this
+trial from the resulting pose.** `require_stage_alignment` now rejects all
+commissioning probes when any initial joint differs from the fixed planned
+baseline by more than that runtime's existing advertised target tolerance.
+This is an additional rejection check, not approval of all poses inside those
+numbers. See the failed run and entry-motion findings in `SDK_COMMISSIONING.md`.

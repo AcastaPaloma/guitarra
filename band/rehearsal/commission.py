@@ -37,6 +37,22 @@ class HeldJointGuard:
             raise RuntimeError(f"Held {self.joint} drift exceeded {self.maximum_drift} normalized units")
 
 
+def require_stage_alignment(stage, info):
+    """Reject commissioning from an off-target pose; never expand SDK tolerances."""
+    default = finite(info.get("target_tolerance"), "SDK target tolerance")
+    overrides = info.get("target_tolerances", {})
+    outside = []
+    for joint in JOINTS:
+        tolerance = finite(overrides.get(joint, default), "SDK joint tolerance")
+        if tolerance <= 0:
+            raise ValueError("Positive SDK target tolerances are required")
+        actual = finite(info["positions"][joint], "joint observation")
+        if abs(actual - stage.baseline[joint]) > tolerance:
+            outside.append(joint)
+    if outside:
+        raise ValueError("Probe starts outside existing SDK target tolerances: " + ", ".join(outside))
+
+
 def require_held_runtime(base_url):
     """Read-only preflight; never stop another operator's motion implicitly."""
     snapshot = get_json(base_url, "/api/animations/status")
@@ -149,6 +165,11 @@ def run_probe(stage_path, kind, output, base_url, token, camera_log, *, joint=No
             record("runtime_before", runtime_before)
             before = client.observe()
             record("before", asdict(before))
+            try:
+                require_stage_alignment(stage, before.data)
+            except ValueError:
+                result["fault_reason"] = "stage_alignment"
+                raise
             held_guard = HeldJointGuard(before.data["positions"]) if kind == "dance" else None
             if held_guard:
                 result["held_joint_guard"] = {"joint": held_guard.joint, "reference": held_guard.reference,
