@@ -1,5 +1,10 @@
 # Five songs, your recorded moves
 
+> **Separate lamp workstream.** The device/UI instructions and results below are not
+> requirements or operating instructions for the guitar arms. For current guitar work use
+> [guitar/DESIGN.md](guitar/DESIGN.md) and [AGENTS.md](AGENTS.md). This body is preserved;
+> no lamp commands are run or authorized by the guitar documentation cleanup.
+
 Open [Dance on the lamp](http://192.168.0.226:8080/#dance) from your laptop on
 the same network (or `http://100.95.68.2:8080/#dance` through Tailscale).
 The existing paired dashboard hosts it; no extra service or serial owner.

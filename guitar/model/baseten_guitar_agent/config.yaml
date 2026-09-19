@@ -1,0 +1,57 @@
+model_name: guitarra-qwen2p5-vl-7b-agent
+python_version: py311
+
+# Baseten/Truss GPU deployment for the robot-guitar model brain. The robot
+# hardware is never controlled from Baseten; this model only proposes tool calls
+# that the local agent loop validates and executes.
+resources:
+  use_gpu: true
+  accelerator: A10G
+  cpu: "4"
+  memory: 24Gi
+
+requirements:
+  - vllm>=0.7.3
+  - transformers>=4.49.0
+  - qwen-vl-utils>=0.0.8
+  - pillow>=10.0.0
+
+environment_variables:
+  HF_MODEL_ID: Qwen/Qwen2.5-VL-7B-Instruct
+  MAX_MODEL_LEN: "8192"
+  MAX_NEW_TOKENS: "768"
+  TEMPERATURE: "0.2"
+  TOP_P: "0.9"
+  GPU_MEMORY_UTILIZATION: "0.90"
+
+# Optional for private/gated Hugging Face models. Qwen2.5-VL-7B-Instruct is
+# public, so this can stay unset unless we switch models.
+secrets:
+  hf_access_token: null
+
+model_metadata:
+  example_model_input:
+    session_id: local-smoke-test
+    system: "You control the safe local robot tools."
+    tools:
+      - name: look
+        description: Take a fresh camera frame without moving.
+        parameters:
+          type: object
+          properties: {}
+          required: []
+          additionalProperties: false
+      - name: done
+        description: End the session.
+        parameters:
+          type: object
+          properties:
+            reason:
+              type: string
+          required: [reason]
+          additionalProperties: false
+    messages:
+      - role: user
+        text: "Session start. Current observation: {\"arm\": {\"at\": \"ready\"}}"
+    generation:
+      effort: medium

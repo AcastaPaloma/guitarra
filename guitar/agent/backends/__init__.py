@@ -23,7 +23,10 @@ def make(name: str, **kw):
     if name == "astra":
         from .astra import AstraBackend
         return AstraBackend(**kw)
+    if name == "baseten":
+        from .baseten import BasetenBackend
+        return BasetenBackend(**kw)
     if name == "scripted":
         from .scripted import ScriptedBackend
         return ScriptedBackend(**kw)
-    raise ValueError(f"unknown backend '{name}' (claude | astra | scripted)")
+    raise ValueError(f"unknown backend '{name}' (claude | astra | baseten | scripted)")

@@ -1,4 +1,9 @@
-# Operator-authored movement vocabulary
+# Operator-authored lamp movement vocabulary
+
+> **Separate lamp assets, not guitar training data.** Do not apply these joint recordings,
+> neutral poses, or timing to the guitar arms. Current guitar scope is
+> [guitar/DESIGN.md](../../guitar/DESIGN.md), with operator rules in
+> [AGENTS.md](../../AGENTS.md). Asset files and their provenance remain unchanged.
 
 These nine unmodified CSV takes were recorded by hand on this lamp on
 2026-09-19. They contain joint positions and timestamps, not music. The stored

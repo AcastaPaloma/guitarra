@@ -1,202 +1,95 @@
-# Connecting the SO-101 arms
+# Same-arm hardware connection and qualification
 
-Two arms: **A = fretting** (holds a string down at a fret), **B = plucking** (holds the pick).
-Both are SO-101 followers — there is no leader/teleop arm in this project. Each has its own
-USB cable and its own power brick.
+Use the existing physical guitar rig, not replacement arms or a new bus topology chosen
+from an old example. This guide is operator-owned; software documentation is not motion
+approval. [../AGENTS.md](../AGENTS.md) is authoritative for clamp/thermal instructions.
 
-## 0. Hardware checklist (do this before anything else)
+## 1. Recorded configuration versus current verification
 
-- [ ] Power brick plugged into the arm's servo bus board **and** the wall. The USB serial
-      chip is on that board; with no power the Mac often sees nothing at all.
-- [ ] USB-C cable is a **data** cable (many are charge-only). Swap it if the port never appears.
-- [ ] Plugged directly into the Mac, not through a hub, for the first test.
-- [ ] Servo daisy-chain cables clicked in; nothing hot; arm free to move.
+| Item | Repository/operator evidence | Still required before a new run |
+|---|---|---|
+| Fretting role | Notes identify SO-101 follower, IDs **7–12**, `motor_id_offset=6`, `arm_id="fret_arm"` | Confirm the actual connected board/arm and present condition |
+| Fretting port | `/dev/cu.usbmodem5B790163191` recorded in current motion defaults | Recheck the device; do not assume a path establishes servo health |
+| Picking role | Intended second arm; no complete picking map in the supplied fret profile | Confirm connection, IDs, calibration, and a qualified pick trajectory |
+| Calibration | `robot/calibration/fret_arm.json` and the driver's matching cache file | Match to this physical arm, servo settings, units, and guitar placement |
+| Poses | `robot/poses/fret_arm.json`, including recorded anchors and interpolations | Qualify the actual subset and transition paths; saved targets are not blanket approval |
+| Grip/protection | Operator history in `AGENTS.md` | Resolve sustained thermal behavior and live-setting versus code-default mismatch |
 
-Verify the Mac sees it:
+The old “arm B is 7–12” and “both arms definitely share one adapter” instructions are
+superseded. Current notes assign 7–12 to the **fretting** arm. Do not renumber, reset,
+recalibrate, or reconnect wiring to make an older diagram true.
 
-```bash
-ls /dev/cu.usb*
-```
+## 2. The gripper rule
 
-You want something like `/dev/cu.usbmodem5AB90687491` (one per arm). If it prints
-`no matches found`, the arm hasn't enumerated — go back to the checklist. For a deeper look:
+The grippers hold the fingertip and pick. Normal motion/rest/disconnect must not loosen
+or open them. `release()` lifts the fingertip from the guitar string—it does not release
+the tool. Ordinary disconnect releases body-joint torque; support the arm so it cannot fall.
 
-```bash
-system_profiler SPUSBDataType | grep -iE "usbmodem|serial|ch34|cp210|product"
-```
+Thermal/electrical emergencies may require removing gripper power; do not defeat protection
+to maintain a grip. Warn the operator to support the tool. Read the full live history in
+`AGENTS.md` rather than assuming a brief low-temperature check qualifies continuous holding.
 
-## 1. Software (one time)
+At the inspected source state, the connection path can reapply the plugin's default grip
+limit and `_before_motion` can reassert grip torque. Those paths need operator/protection
+review **before** autonomous rehearsal or data collection. A small turn budget is not a fix.
 
-Python 3.10 via pyenv is already on this machine; lerobot needs 3.10–3.12.
+## 3. Driver and control interfaces
 
-```bash
-cd ~/Downloads/hackathons/astra-guitar && uv venv --python 3.10 .venv && uv pip install --python .venv/bin/python "lerobot[feetech]"
-```
+`lerobot_robot_astra` is the local LeRobot hardware plugin name, not a requirement to use
+the Astra model. Its `motor_id_offset` distinguishes address maps. `robot/arm.py` wraps the
+plugin; `motions.py` exposes the higher-level callable interface. There is no separate
+`robot/so101.py` dual-arm wrapper to invoke.
 
-Then for every new terminal:
+Important differences:
 
-```bash
-source ~/Downloads/hackathons/astra-guitar/.venv/bin/activate
-```
+- `motions.connect()` is fake by default and explicitly selects position base control.
+- `RealArm` retains a legacy speed-mode default; the current agent CLI does not expose the
+  same base-mode selection. Do not infer a base fault from motor addresses.
+- Connection is **not** a read-only operation: it can enable holding torque, configure
+  motors, and clamp the tool. Disconnect also has physical consequences.
+- Guards/pose math expect particular joint units. Verify the installed driver's normalization,
+  calibration, and base mode; do not treat every `.pos` field as interchangeable degrees/ticks.
+- One process must own each serial bus. A shared bus needs unique IDs and coordinated
+  ownership; two independent controllers must not open the same port.
 
-## 2. Find each arm's port
+## 4. Host discovery is not arm qualification
 
-Plug in **one arm at a time** and run:
-
-```bash
-lerobot-find-port
-```
-
-It asks you to unplug the USB, press Enter, and reports the port that disappeared. Write it down:
-
-| arm | role  | port                          | id           |
-|-----|-------|-------------------------------|--------------|
-| A   | fret  | /dev/cu.usbmodem5B790163191   | fret_arm     |  (verified 2026-09-19: 6× STS3215, **IDs 7–12**, own board — `--robot.motor_id_offset=6`)
-| B   | pluck | not connected                  | pluck_arm    |  (2026-09-15 note: a 1–6 arm on /dev/cu.usbmodem5A7C1220421 — re-verify which arm that is)
-
-macOS port names are stable for a given board+USB port, so keep each arm on the same
-physical Mac port for the hackathon.
-
-## 3. Set motor IDs (only if the arm was never configured)
-
-A factory SO-101 kit sometimes ships with every servo at ID 1. If calibration complains about
-duplicate IDs, run this with **only one servo** connected at a time and follow the prompts:
+This only lists host serial device names; it does not connect to the servos:
 
 ```bash
-lerobot-setup-motors --robot.type=so101_follower --robot.port=/dev/cu.usbmodemXXXX
+python3 - <<'PY'
+import glob
+ports = sorted(glob.glob('/dev/cu.usb*'))
+print('\n'.join(ports) if ports else 'No matching USB serial devices')
+PY
 ```
 
-Skip this if the arm came pre-assembled and tested.
+Check cables, power ratings, adapter, and wiring under the operator/manufacturer procedure.
+Do not hot-plug servo wiring or power-cycle a loaded/unsupported arm based on a generic
+software checklist. LEDs and port enumeration do not establish valid servo communication.
 
-## 4. Calibrate (once per arm; saved under ~/.cache/huggingface/lerobot/calibration)
+## 5. Qualification progression
 
-Put the arm roughly mid-range on every joint first, then:
+1. Review connection/disconnection/clamp side effects and resolve the active thermal/config
+   issue before opening a new controller session.
+2. Verify current addresses, units, pose/calibration pairing, and allowed working ranges.
+3. Establish a reviewed no-motion telemetry procedure; do not assume calling a library
+   method named `connect()` is torque-neutral.
+4. Qualify independent stop/holding behavior for faults, communication loss, and model waits.
+5. Test a small approved motion/transition subset, one at a time with the workspace clear.
+6. Qualify a single pluck and fretted note before phrase coordination or repeated trials.
+7. Record profile/registry versions, preparation/settling limits, and bounded contact holds.
 
-```bash
-lerobot-calibrate --robot.type=so101_follower --robot.port=/dev/cu.usbmodemXXXX --robot.id=fret_arm
-```
+Do not blindly copy the repository calibration into the live cache, recalibrate the whole
+rig as startup, run an unattended 54-target sweep, or use a large step-response probe.
+Interpolation and “mm” depth values are pose-map estimates, not a contact-force measurement.
 
-It will ask you to move each joint through its full range, then press Enter. Repeat for
-`pluck_arm` with its own port. The `--robot.id` is what ties a calibration file to an arm —
-keep the names exactly `fret_arm` and `pluck_arm`; the code will look them up by these.
+## 6. Scripts are maintenance tools, not startup tests
 
-## 5. Smoke test
+The ID, calibration, grip, pose-recording, and sweep scripts can have physical side effects.
+Some retain historical port/base-mode defaults. Inspect their exact behavior and use them
+only for an explicit operator-approved maintenance task. No script is invoked by this guide.
 
-With the venv active, this reads joint positions once and disconnects (no motion):
-
-```bash
-python -c "from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig as C; r=SO101Follower(C(port='/dev/cu.usbmodemXXXX', id='fret_arm')); r.connect(); print(r.get_observation()); r.disconnect()"
-```
-
-Expected: a dict of six `<motor>.pos` values in degrees. Wiggle a joint by hand and run it
-again — the number should change.
-
-If `connect()` raises about calibration, step 4 didn't save under that id. If it raises a
-serial/permission error, another process (a previous script, the calibration tool) still
-has the port open — close it.
-
-## 5b. LeRobot robot type `astra_so101` (any motor IDs)
-
-`lerobot_robot_astra/` is a LeRobot plugin: stock `SO101Follower` with a `motor_id_offset`
-(0 → IDs 1–6, 6 → IDs 7–12). Installed editable into `.venv` (`pip install -e .`, done), it is
-auto-registered for every `lerobot-*` CLI. The venv uses the local checkout
-`~/Documents/lerobot/lerobot` (Python 3.12).
-
-```bash
-.venv/bin/python scripts/arm_check.py --port /dev/cu.usbmodem5B790163191 --id fret_arm --offset 6
-.venv/bin/lerobot-calibrate --robot.type=astra_so101 --robot.port=/dev/cu.usbmodem5B790163191 --robot.id=fret_arm --robot.motor_id_offset=6
-```
-
-In code: `AstraSO101(AstraSO101Config(port=..., id="fret_arm", motor_id_offset=6))`, then the
-usual `connect()` / `get_observation()` / `send_action()`. The 7–12 renumbering below ended up on the **fretting** arm, not arm B;
-this replaces the "raw `FeetechMotorsBus` + hand-recorded min/max" plan.
-
-## 6. Where this plugs into the code
-
-(Current layout: `robot/arm.py` wraps `AstraSO101` with poses, interpolation and guards;
-the AI loop is `agent/loop.py` - see `agent/README.md`. The older plan follows.)
-
-`robot/so101.py` opens both arms from a small config:
-
-```
-arms:
-  fret:  {port: /dev/cu.usbmodem..., id: fret_arm}
-  pluck: {port: /dev/cu.usbmodem..., id: pluck_arm}
-```
-
-Everything else (poses, guards, interpolator) talks to that wrapper, never to the port directly.
-
-## Gotchas
-
-- Two arms = two USB ports on the Mac. If you must use a hub, use a powered one; the serial
-  boards are picky about bus power.
-- Torque stays on after a script crashes. Power-cycle the arm before moving it by hand to
-  record poses, or use `robot.bus.disable_torque()` in the pose-recording script.
-- The MacBook camera/mic permission prompt appears the first time the terminal opens them;
-  if you're running from an IDE terminal, the permission is granted to the IDE, not to Terminal.
-
----
-
-# Two arms on one bus — renumbering arm B to IDs 7–12
-
-**Symptom:** both arms powered (all servo LEDs red), chained together, but `broadcast_ping`
-reports only 6 motors. Plugging in either arm alone works.
-
-**Cause:** every SO-101 ships with its six servos at IDs **1–6**. On a shared half-duplex bus
-two servos answer to the same address and garble each other's replies. It is an addressing
-collision, not a cable, power, or driver problem. There is no config that makes 12 appear —
-arm B's servos must be given new IDs first.
-
-**Plan:** arm A keeps 1–6. Arm B becomes 7–12, in the same joint order:
-
-| joint          | arm A | arm B |
-|----------------|-------|-------|
-| shoulder_pan   | 1     | 7     |
-| shoulder_lift  | 2     | 8     |
-| elbow_flex     | 3     | 9     |
-| wrist_flex     | 4     | 10    |
-| wrist_roll     | 5     | 11    |
-| gripper        | 6     | 12    |
-
-New ID = old ID + 6, so you don't have to track which servo you're holding — the script
-prints the ID it found.
-
-## Procedure
-
-1. **Unplug arm A entirely** from the bus board. Only arm B's servos get touched here.
-2. **Break arm B's daisy chain.** Connect exactly **one** arm-B servo to the board with a
-   single 3-pin cable. Everything else off the bus.
-3. Check what's there:
-   ```bash
-   .venv/bin/python scripts/set_motor_id.py --scan
-   ```
-   Expect exactly one ID. If it prints more than one, another servo is still chained —
-   the script refuses to run in that case, by design.
-4. Assign `found + 6`:
-   ```bash
-   .venv/bin/python scripts/set_motor_id.py 7
-   ```
-   (`8` for the servo that reported 2, `9` for 3, and so on.)
-5. Unplug that servo, connect the next arm-B servo alone, repeat until all six are 7–12.
-6. Rebuild arm B's daisy chain, then chain arm B onto arm A's last servo with a long
-   3-pin cable. Reconnect arm A to the board.
-7. Verify all twelve:
-   ```bash
-   .venv/bin/python scripts/set_motor_id.py --scan
-   ```
-   Expect `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]`.
-
-## Notes
-
-- The ID lives in the servo's EEPROM, so it survives power cycles. Do this once.
-- `setup_motor` also writes the bus default baud rate (1 Mbps) — if a servo was at a different
-  rate, this fixes it at the same time.
-- `SO101Follower` hardcodes IDs 1–6, so **arm B is driven through a raw `FeetechMotorsBus`**
-  with a 7–12 motor map (same pattern as `scripts/grip_pick.py`). Calibrate arm B by recording
-  min/max per joint on the raw bus, not with `lerobot-calibrate`.
-- Label the arms physically (tape) once renumbered. A 7–12 arm plugged in alone will look
-  "broken" to any tool expecting 1–6.
-- **Alternative:** a second Waveshare Bus Servo Adapter (~$8) gives arm B its own port and
-  skips all of this — both arms keep IDs 1–6 and both work with stock `SO101Follower`. Worth
-  ordering as a backup regardless, since one PSU driving 12 servos can brown out when the
-  fretting arm presses.
+[SETUP.md](SETUP.md) owns software installation. [MOTIONS.md](MOTIONS.md) documents the
+current callable interface. [STATUS.md](STATUS.md) records gaps; [PLANNING.md](PLANNING.md)
+provides the proposed local scheduler/telemetry design. None overrides the operator rules.

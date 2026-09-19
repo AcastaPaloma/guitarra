@@ -1,4 +1,10 @@
-# Prompt for the agent with external camera and YouTube access
+# Archived lamp task prompt — not current guitar instructions
+
+> **Reference only.** The task prompt below belongs to the separate lamp visual-performance
+> effort. Do not execute it as the current guitar task, copy its simulated-performer scope,
+> operate hardware, or inherit its commit/push instructions. Current requirements are in
+> [guitar/DESIGN.md](guitar/DESIGN.md), implementation facts in [guitar/STATUS.md](guitar/STATUS.md),
+> and operator authority in [AGENTS.md](AGENTS.md). The original prompt body is preserved.
 
 You are taking over the visual performance phase of a real robot band project. Work with the live lamp, inspect external camera footage, study actual duet performances, and implement the smallest evidence-backed code changes that make the lamp a convincing frontperson. Do not stop at aesthetic advice: connect each finding to a specific function, configuration, or new module and verify the result physically.
 

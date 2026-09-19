@@ -1,5 +1,11 @@
 # Bill: the robot band in two minutes
 
+> **Separate lamp/band reference, not the current guitar brief.** The preserved proposal
+> and status below concern that workstream. The current guitar plan is
+> [same-arm, pretrained-model rehearsal](guitar/DESIGN.md), with [implementation gaps](guitar/STATUS.md)
+> tracked separately. It does not require lamp performers, five prepared songs, simulation,
+> or weight fine-tuning. Do not apply this older brief's hardware status to the current rig.
+
 **The lamp is the frontperson. The guitar is its bandmate.** The lamp takes requests, talks to the crowd, sings through the audio system, dances, introduces solos, and visibly reacts to the guitarist. The guitarist plays accompaniment and takes the spotlight when invited.
 
 First perfect five prepared songs that judges can request in any order. Unfamiliar songs need an arrangement the mechanism can play, prepared vocals, and validation before performance.

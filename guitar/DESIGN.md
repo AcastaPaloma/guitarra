@@ -1,165 +1,120 @@
-# astra-guitar — Design
+# Current guitar design — pretrained agents, bounded rehearsal
 
-Goal: GPT-6 Astra controls an SO-101 arm to strum open-tuned chords on a real guitar,
-and self-corrects from microphone + camera feedback — the guitar version of
-thijs (@cdngdev)'s Golden Gate painting timelapse.
+**This document owns the current guitar requirements.** [STATUS.md](STATUS.md) records
+implementation evidence; [../AGENTS.md](../AGENTS.md) owns operator/gripper instructions.
+Historical painting, single-arm open-G, π0.5, and lamp/band designs are not this build plan.
 
-## 1. What the painting demo actually was
+## 1. The product
 
-- Hardware: SO-101 (LeRobot 5-DoF arm) holding a brush, one fixed camera aimed at the canvas.
-- Brain: `gpt-6-astra` via the OpenAI **Responses API** (function calling only works there).
-  Limited rollout as of 2026-09-04; $10 / $50 per MTok in/out.
-- The loop:
-  1. Camera frame + goal + small tool vocabulary → Astra.
-  2. Astra emits strokes as tool calls; code executes them through LeRobot.
-  3. New frame → back to Astra with "here's what you did, here's the goal, what next?"
-  4. Repeat. "Self-correct" = model comparing its own frame to its intent and revising.
-- innate-os PR #817 pattern: minimal Responses body, only tools it can really call in the
-  prompt, workspace/joint guards that reject bad targets before motion, telemetry re-read
-  after the model decides.
-- Robocurve eval settings worth copying: medium thinking, ~20-call budget, 25% speed cap.
+Use the **same physical two-arm guitar rig** with defined, qualified fret/press, release,
+and pluck tools. The agent chooses musical actions and revises its next attempt from
+observations. It does not discover unrestricted motor control from scratch.
 
-## 2. Mapping to guitar
-
-Painting is judged by a camera; guitar is judged by a **microphone**. Audio is easier to
-score than an image — give Astra a number it can push up.
-
-- Scope: strum open-tuned chords with one arm. Open-G tuning (D-G-D-G-B-D) → open strings
-  are G major; a capo turns that into any major chord. Human moves the capo between segments.
-- Tool vocabulary (3 tools, `strict: true`, numeric limits in the schema):
-  - `play(pattern: [{dir:"down"|"up", at_ms:int}], depth_mm: 0–15, speed: 0.2–1.0)`
-    — Astra writes the rhythm; the interpolator executes it on schedule and the scorer grades
-    timing against the plan Astra itself wrote (see sense/README.md).
-  - `done(reason)`
-- Astra tunes `pattern`, `depth_mm` and `speed` (the "brush pressure" analog). It never sees joints.
-
-## 3. Architecture
-
-```
-mic ──► scorer ─┐
-                ├─► Astra (Responses API, tools) ─► guard ─► LeRobot SO101Follower
-cam ──► frame ──┘         ▲                                          │
-                          └────── observation after every action ◄──┘
+```text
+Goal + supported capabilities + current state + attempt history
+                            |
+                            v
+                 Pretrained planner on a verified endpoint
+                            |
+                            v
+             Local validation + motion/timing compilation
+                            |
+                            v
+                  Same fret arm + same pick arm
+                            |
+                 +----------+----------+
+                 |                     |
+           Motor telemetry      Optional consented recording
+                 |                     |
+                 |              Pretrained audio evaluator
+                 |                     |
+                 +------> next planner observation
 ```
 
-### Robot layer (LeRobot)
-- `SO101FollowerConfig(port, id, cameras)` → `SO101Follower(cfg)` → `connect()`.
-- `get_observation()` → `{"<motor>.pos": deg, ..., "<cam>": ndarray}`.
-- `send_action({"<motor>.pos": deg, ...})`.
-- No built-in IK → do **not** expose Cartesian `move_to`. Record named poses instead:
-  `above_strings`, `strum_start`, `strum_end`, `rest`.
-- `strum()` = linear interpolation strum_start → strum_end; `depth_mm` offsets wrist_flex
-  (degrees-per-mm measured empirically); `speed` sets step delay.
+Start with a short playable phrase and pauses between attempts. Do not require arbitrary
+chords, all frets, a full song, or a new robot policy before one qualified note/phrase works.
+The model may construct a sequence from available notes; it need not be restricted to a
+menu of prewritten songs. Local code rejects physically infeasible arrangements.
 
-### Scorer (replaces "look at the canvas")
-After each strum, record ~1.2 s and compute:
-- RMS loudness (did strings get hit at all — #1 failure mode is depth too shallow).
-- Chroma / pitch-class energy (`librosa.chroma_cqt`) vs target chord → `chord_match` 0–1
-  plus `missing` notes (missing high strings = strum stopped short; missing low = started deep).
-- Onset count (all 6 rang vs pick snagged).
-Return as the `function_call_output` string, e.g.
-`{"rms":0.04,"chord_match":0.55,"missing":["B","E"],"onsets":3,"note":"strum ended early"}`.
+## 2. What “self-tuning” means
 
-### Astra loop (Responses API)
-- `client.responses.create(model="gpt-6-astra", instructions, tools, input)`.
-- Each turn: execute every `function_call` item; append `function_call_output` with matching
-  `call_id` containing scorer JSON **and** an `input_image` (base64 data URL) of the frame.
-- Use `previous_response_id` for continuity; only send new items per turn.
-- `reasoning.effort = "medium"`; cap turns (~20), spend, and wall time.
-- Retry only on 429/5xx; never retry a turn whose tool already executed.
-- System prompt: physical setup (tuning, capo, pick, camera view), goal, metric semantics
-  ("chord_match ≥ 0.85 and onsets ≥ 5 is clean"), and "change one parameter at a time and
-  say why" — that text is the timelapse narration.
+The planner can change an approved phrase, choose a qualified playing/timing profile,
+request inspection, or pause. Include previous outcomes in the next request and save a
+best validated plan explicitly if it should persist across sessions.
 
-### Guards (separate module, pure functions, unit-tested with no hardware)
-- Clamp every interpolated target to calibrated range AND a tighter workspace box recorded
-  around the strings; reject the whole strum if any step leaves it (no silent clamping).
-- Re-read `get_observation()` before executing; abort if arm isn't within a few degrees of
-  where the last action left it.
-- Speed cap independent of what the model asks for.
-- Keyboard kill switch → `rest` + disconnect.
+This is **closed-loop rehearsal / in-context adaptation**, not neural-weight fine-tuning.
+A pretrained evaluator can assess recordings without a new classifier-training project.
+No H100 training job, LoRA adapter, simulated acoustic reward, or physical RL is needed
+for this loop. [FINETUNING.md](FINETUNING.md) is deferred research only.
 
-## 4. What Astra sees per turn (observation packet)
+Do not promise every attempt improves. Use a consistent evaluation rubric, preserve
+uncertainty, and report actual comparisons and interventions. An audio model's explanation
+is not a definitive mechanical diagnosis or exact millisecond measurement.
 
-Raw joint angles alone don't work — no reference frame. Send, in fixed order:
-1. Named-pose state: `arm: at strum_end (within 2°)`, `last_strum: depth_mm=6, speed=0.5, direction=down`.
-2. Raw joints labeled with the recorded reference next to them (drift / stall detection only).
-3. Camera frame (bridge-height view) + scorer JSON.
+## 3. Roles and authority
 
-| You implement (deterministic)                    | Astra decides         |
-|--------------------------------------------------|-----------------------|
-| depth_mm → wrist_flex offset                      | what depth to try     |
-| speed → interpolator step delay                   | what speed to try     |
-| pose interpolation, clamps, workspace box         | nothing               |
-| "arm is at pose X" summarizer                     | reading that summary  |
+| Role | Owns | Does not own |
+|---|---|---|
+| Planner | Proposed note/phrase choices and permitted adjustments | Motor angles, arbitrary via-points, calibration, grip settings, safety limits |
+| Audio evaluator | Assessment of a real clip against the intended phrase, with uncertainty | Tool execution or physical fault diagnosis as certainty |
+| Local compiler/scheduler | Feasibility, approved paths/profiles, numeric timing, arm resource ordering | Invented acoustic success or silent tempo changes |
+| Local controller/operator | Execution, current readiness, stop/thermal behavior, physical qualification | Waiting on a model before respecting a fault/protection condition |
 
-## 5. Camera + mic placement
+The evaluator may share a model with the planner only if that exact endpoint supports and
+passes the required combined-input tests. Otherwise use a separate audio-capable endpoint.
+The current Qwen2.5-VL deployment scaffold is image/text, not a raw-audio evaluator.
 
-- Guitar flat on the table, face up, body clamped so the arm can't walk it.
-- **One camera at string height, ~20–30 cm off the end of the bridge, looking up the neck.**
-  Six strings stack vertically; pick depth reads as distance below the top string line.
-  Overhead is useless for depth — only use it as a recording camera for the timelapse.
-- Optional wrist camera (LeRobot mount) — nice-to-have.
-- White paper/tape behind the strings on the far side for contrast.
-- Guitar is an unplugged electric → quiet; MacBook must sit within ~20–30 cm of the strings.
-- MacBook camera = OpenCV index 0; grab one frame per turn with `cv2.VideoCapture(0)`.
-  MacBook mic via `sounddevice`. Grant macOS camera/mic permission to the terminal first;
-  check RMS is nonzero before blaming the scorer.
-- Downscale frames to ~768 px wide, JPEG q≈70 before base64.
+## 4. Baseten and other providers
 
-## 6. Repo infrastructure
+Baseten is the intended product inference platform. Use actual Baseten request/deployment
+evidence for that claim. Existing Astra/Claude clients are alternative backends; their
+requests do not demonstrate Baseten inference. No Baseten-hosted Astra endpoint is assumed.
 
-```
-astra-guitar/
-  robot/       poses.json, interpolator, guards, so101 wrapper, fake_robot
-  sense/       camera grab, mic record, chord scorer
-  agent/       tools schema, prompt builder, responses loop, budget
-  runs/        one folder per run: frames, wavs, decisions.jsonl
-  dash/        local web page that tails a run (the timelapse view)
-  scripts/     calibrate, record_poses, replay
-```
+A dedicated pretrained deployment or hosted Model API can implement a model role. Choose
+by capability, measured behavior, access, and budget—not because an old default exists.
+Dedicated inference may use a GPU without any fine-tuning. The current Baseten client is
+direct HTTP; the presence of OpenAI/Anthropic packages for other backends is not provider routing.
+See [model/README.md](model/README.md) for the actual scaffold and unresolved server contract.
 
-1. **Observation packet builder** — one function, fixed order, stored per turn for replay.
-2. **Tool registry** — `(json_schema, callable, summarizer)` per tool; loop dispatches by name.
-3. **FakeRobot + canned scorer** — same dict shapes; run the whole Astra loop with no hardware.
-4. **Run recorder** — per turn: `frame_NNN.jpg`, `strum_NNN.wav`, `decisions.jsonl`
-   `{turn, tool_calls, args, scorer, arm_state, model_text, latency_ms, tokens}`.
-5. **Responses loop** — previous_response_id, budgets (turns/spend/time), safe retries, effort flag.
-6. **Dashboard** — streams `output_text.delta` + `output_item.done`, latest frame, chord_match
-   sparkline over SSE/WebSocket. Reads from the run folder → works on replays too.
-7. **Guards module** — the only path to the servo bus.
-8. **Scripts** — `record_poses`, `calibrate_depth`, `test_scorer`, `replay <run> <turn>`.
+## 5. Local execution rules
 
-## 6b. π0.5 as System 1 (from Galbot's "Astra as an Embodied Policy")
+- Use the same verified hardware mapping; do not reset IDs, change wiring, or replace arms
+  to fit an old example. Existing poses and interpolated targets still need qualification.
+- Keep the grippers clamped during normal operation; `release()` lifts the fingertip.
+  Thermal/electrical emergencies override grip retention. Follow `AGENTS.md` exactly.
+- Keep numerical scheduling off the cloud path. Compile a whole phrase with fret preparation
+  before picking; reject infeasible timing or ask for an explicitly approved slowdown.
+- Avoid unnecessary rest/re-press actions, but preserve necessary lift/clearance/pick reset
+  and bounded holding time. The present fret code already avoids mandatory global rest.
+- Validate current state/calibration, action availability, path constraints, request expiry,
+  duplicates, and recovery/attempt budgets locally. These are requirements, not all currently
+  implemented protections; consult `STATUS.md`.
+- Await models only from a qualified quiescent state; do not leave a press or hazardous hold
+  active indefinitely while a network request runs. Do not equate that with automatic homing.
+- Never silently replay motion after a fault or uncertain execution. Stop behavior is local
+  and independent; generic “Ctrl-C → rest” is not an emergency-stop design.
 
-The hybrid in that paper: π0.5 proposes a 50-step joint chunk; FK turns it into end-effector
-poses Astra can read; Astra either **accepts** 1–15 steps or **corrects** with its own EEF
-target for 1–5 steps; execute; re-observe. Astra touched only 14.4% of steps and the hybrid
-used 45% fewer tokens than Astra writing every action itself. Caveat from their RoboLab run:
-with an un-tuned π0.5 the hybrid was slightly *worse* than direct Astra.
+## 6. Inputs, observations, and evidence
 
-Here the same shape, with a swappable proposer:
-- `PoseTableProposer` — the fret/pluck interpolator (works today; our real System 1).
-- `Pi05Proposer` — `hqfang/pi05-so100_101` on a GPU policy server; single-arm (6-D) only,
-  zero-shot, never seen a guitar. **Parked** (16.6 GB, own patched env, no benefit to the
-  audio-feedback loop) — recipe lives in SETUP.md §3 if we want the comparison chart.
-- Astra's tools become `accept(steps)` / `correct(fret, press_mm, velocity, at_ms)` instead
-  of "invent the action" — the framing that halved tokens in the paper.
-See `SETUP.md` §3–4 for wiring.
+Camera snapshots/short clips and optional audio capture require consent and fresh timestamps.
+Current code sends snapshots and a local acoustic summary, not continuous audio/video to
+an omni model. Adding an external audio evaluator is a separate integration task, not a
+fine-tune. Bad/missing capture should produce uncertainty, not an assumed missed pluck.
 
-## 7. Build order
+Keep mechanical telemetry, local audio estimates, model assessments, and operator judgments
+separate. Fake-arm behavior and rendered audio are not physical latency/note-quality labels.
+Detailed requirements are in [sensing](sense/README.md) and [rehearsal](REHEARSAL_LOOP.md).
 
-1. Recorder + FakeRobot + Responses loop (software only).
-2. Scorer against hand strumming; validate mic + permissions.
-3. Real poses + interpolator + guards (needs the arm).
-4. Connect real strum; start deliberately too shallow so there's something to correct.
-5. Dashboard last. Screen-record it next to the arm — that's the demo.
+## 7. Immediate implementation priorities
 
-## Sources
-- https://x.com/cdngdev/status/2097339677128982873
-- https://github.com/zjwzcx/Awesome-Astra-Embodied-AI
-- https://openai.robocurve.org/gpt-6-astra/
-- https://github.com/innate-inc/innate-os/pull/817
-- https://github.com/Anil-matcha/awesome-gpt-6-astra
-- https://github.com/huggingface/lerobot/blob/main/docs/source/il_robots.mdx
-- https://developers.openai.com/api/docs/guides/function-calling
+1. Resolve the current hardware configuration/protection blockers with the operator; do not
+   run unattended attempts. Offline software work can proceed in parallel.
+2. Finish/test the model endpoint contract with non-motion requests, then fake tool execution.
+3. Qualify the missing physical pick/fret/transition subset and implement local coordination.
+4. Add bounded attempt recording, one verified audio-evaluation path if enabled, history,
+   and reviewed plan revision. No training pipeline is required.
+5. Improve state reuse and timing using real telemetry and deterministic planning.
+6. Only reconsider weight training after a measured failure/benefit hypothesis and an
+   explicitly approved separate experiment.
+
+No source-code or hardware behavior changes are implied by a documentation update.

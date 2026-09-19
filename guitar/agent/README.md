@@ -1,116 +1,99 @@
-# agent/ — the embodied loop
+# Agent loop — current code versus target rehearsal
 
+[DESIGN.md](../DESIGN.md) owns the current guitar requirements: same two arms, defined
+qualified tools, a pretrained planner, and optional pretrained audio assessment feeding
+bounded plan revision. **That loop does not require weight fine-tuning.**
+
+This directory has an earlier single-role implementation. It is not a completed two-arm
+phrase scheduler, external audio-evaluator loop, or independent hardware watchdog.
+[STATUS.md](../STATUS.md) lists remaining code gaps; this README does not fix them.
+
+## Current data path
+
+```text
+Camera relay -> one JPEG snapshot --------+
+Local mic heuristics -> text score -------+-> selected backend -> proposed tool calls
+Arm summary -----------------------------+                         |
+                                                                  v
+                      local Toolbox -> Arm -> trajectory guards -> device driver
 ```
-iPad ─► Camo ─► sense/camera_relay.py ─► /astra.jpg ─┐
-mic ─► sense/mic.py (ring buffer + pluck scorer) ────┼─► backend (astra | claude)
-arm state (nearest named pose) ──────────────────────┘        │ tool calls
-                                                              ▼
-      agent/tools.py ─► robot/arm.py: poses → interpolate → robot/guards.py ─► AstraSO101 ─► arm
-```
 
-The model never sees or sets joint angles. `--role fret` (the connected arm, IDs 7–12) gets
-`fret(fret, press_mm, speed)`, `release(speed)`, `move_to`, `look`, `done`; after each press it waits
-for the string to be plucked (by you, for now) and scores the pitch against the fretted note.
-`--role pluck` gets `pluck(depth_mm, speed)` instead. `fret` always lifts before travelling along
-the neck, and `move_to` is refused while a fret is held. Every motion is planned in full, then the
-guards check it (calibrated range, the workspace box around the recorded poses, a speed cap, and
-"is the arm where we left it"). Anything that fails is rejected and sent back to the model as an
-error; nothing is silently clamped.
+The selected backend sees text/images, not a continuous raw audio/video feed. The local
+mic summary is not an external audio model's assessment. The current Baseten Qwen2.5-VL
+configuration is not a raw-audio endpoint.
 
-| file | role |
+## Files and current behavior
+
+| File | Role / limitation |
 |---|---|
-| `loop.py` | CLI, turn/time budget, run recorder, Ctrl-C → rest → torque off |
-| `tools.py` | provider-neutral tool specs + execution |
-| `backends/claude.py` | Anthropic Messages API, `claude-opus-5`, adaptive thinking, image tool results |
-| `backends/astra.py` | OpenAI Responses API, `gpt-6-astra`. Verified live 2026-09-19 (fake arm, real camera + mic) |
-| `backends/scripted.py` | fixed plan, no API. Used for testing |
+| [`loop.py`](loop.py) | CLI, one arm role, recorder, turn/time counters; defaults to `claude`; attempts rest in cleanup |
+| [`tools.py`](tools.py) | Common tool specs and execution; numeric checks and motion guards, not full fresh-state/expiry/thermal admission |
+| [`backends/astra.py`](backends/astra.py) | Astra Responses API adapter; separate provider from Baseten |
+| [`backends/claude.py`](backends/claude.py) | Anthropic Messages adapter; separate provider from Baseten |
+| [`backends/baseten.py`](backends/baseten.py) | Direct HTTP custom-predict client; requires matching server implementation |
+| [`backends/scripted.py`](backends/scripted.py) | Fixed fake-test plan; not inference or autonomous learning |
 
-## The gripper always holds the tool
+Historical notes reported Astra/Claude API use. This review performs no live calls and
+establishes no Baseten endpoint, physical improvement, or acoustic qualification.
 
-`AstraSO101(..., clamp_gripper=True)` (used by `robot/arm.py` and every script here) treats the
-gripper as a clamp for the fingertip extension or pick. It closes on the tool at connect and keeps
-squeezing at 18% torque; that's under the servo's overload trigger, which otherwise eases off or
-cuts the grip after about 2 s. It ignores gripper actions and stays clamped through calibration,
-pose recording and disconnect; only the five body joints ever go limp. After a power cycle, or to
-reseat the tip:
+### Tools
 
-```bash
-.venv/bin/python scripts/grip_tool.py --open     # open, insert tip, Enter -> clamps
-.venv/bin/python scripts/grip_tool.py --status   # read-only check
-```
+- Fret role: `fret(string, fret, press_mm, speed)`, `release(speed)`, `move_to`, `look`, `done`.
+- Pluck role: `pluck(depth_mm, speed)`, `move_to`, `look`, `done`.
+- Fret execution can wait for a human pluck when a microphone is enabled. That is not
+  automatic coordination with a second arm.
+- The supplied fret map has no plucking poses. A pluck-role fake run with its default
+  `pluck_arm` map is not a valid smoke test of the bundled checkout.
+- The model can request numeric depth/speed within API checks today. The intended rehearsal
+  design must restrict adjustments to the operator-qualified subset/profiles; a broad
+  software range is not physical permission to explore every value.
 
-## Calibration file
+## Flags and provider selection
 
-LeRobot reads the joint calibration from `~/.cache/huggingface/lerobot/calibration/robots/astra_so101/fret_arm.json`.
-A copy that matches `robot/poses/fret_arm.json` is versioned at `robot/calibration/fret_arm.json`. On a new
-machine, or after the cache is cleared:
+The CLI defaults to `--backend claude`, `--role fret`, and **real hardware unless
+`--fake-arm` is supplied**. Select the provider explicitly; a Baseten setup file does not
+change that default.
 
-```bash
-mkdir -p ~/.cache/huggingface/lerobot/calibration/robots/astra_so101 && cp robot/calibration/fret_arm.json ~/.cache/huggingface/lerobot/calibration/robots/astra_so101/
-```
-Poses and calibration belong together: recalibrating a joint changes what the stored poses mean
-(`scripts/fix_joint_calibration.py` shifts the poses to match).
+`--no-mic` and `--no-camera` disable those observation paths. They do not rewrite the
+system/tool descriptions, which still assume audio feedback and contain overconfident
+heuristic interpretations. Treat “judge from the camera” as missing audio evidence, not
+an alternative acoustic measurement. Prompt/evidence-mode handling is a pending code fix.
 
-## Calibration file
+`--turns` and `--minutes` are not independent watchdogs: checks occur between turns, after
+calls execute, and do not bound every action in a response before dispatch. Model/network
+work is synchronous. Do not describe those counters as a complete autonomous safety system.
 
-LeRobot reads the joint calibration from `~/.cache/huggingface/lerobot/calibration/robots/astra_so101/fret_arm.json`.
-The copy matching `robot/poses/fret_arm.json` is at `robot/calibration/fret_arm.json`. To restore it:
+## Stop, connection, and clamp behavior
 
-```bash
-mkdir -p ~/.cache/huggingface/lerobot/calibration/robots/astra_so101 && cp robot/calibration/fret_arm.json ~/.cache/huggingface/lerobot/calibration/robots/astra_so101/
-```
-Poses and calibration belong together (`scripts/fix_joint_calibration.py` shifts poses when it recalibrates).
+Before hardware use, read [../../AGENTS.md](../../AGENTS.md) and
+[CONNECT.md](../CONNECT.md). The operator's current live grip setting, code default mismatch,
+thermal history, and grip-reassertion behavior require review before repetition.
 
-## Moving to a string/fret by name
+- `RealArm` constructed by this CLI retains its legacy speed-base default. The callable
+  [motion API](../MOTIONS.md) chooses position mode explicitly; they are not identical paths.
+- The loop currently attempts `arm.rest()` in `finally`, including error/interrupt paths,
+  then disconnects. This can command motion; it is **not** an independent emergency stop.
+- The callable motion context instead disconnects without an automatic return-to-rest.
+- Ordinary disconnect releases body torque while retaining the tool grip; support the arm.
+  Thermal/electrical emergencies may require grip power removal under the operator policy.
+- Never open grippers, restore calibration, increase torque, or bypass protection as a
+  routine agent startup or recovery step. No maintenance command is part of this README's
+  default workflow.
 
-```bash
-.venv/bin/python scripts/hover.py          # interactive: type A5, e1, E9, ready, where, release, q
-.venv/bin/python scripts/hover.py G3       # one move
-```
-`e` = low E (6th string), `A D G B`, `E` = high E (1st); frets 1-9. The fret arm's base servo is
-faulty (it drives one way whatever it's told), so by default you turn the base by hand from a
-live readout and the other joints move by themselves. After replacing the servo, use `--power-base`.
+## Runtime setup and tests
 
-## One-time setup (at the arm)
+[SETUP.md](../SETUP.md) owns software setup, [model/README.md](../model/README.md) owns the
+Baseten contract, and [sense/README.md](../sense/README.md) owns input/evaluator details.
+Do not paste an old hardware launch command before resolving the qualification gates.
 
-1. **Calibrate** the fretting arm (CONNECT.md §5b):
-   ```bash
-   .venv/bin/lerobot-calibrate --robot.type=astra_so101 --robot.port=/dev/cu.usbmodem5B790163191 --robot.id=fret_arm --robot.motor_id_offset=6
-   ```
-2. **Record poses** (torque off, move by hand, Enter to save): `rest`, then `above_fret_N` and
-   `touch_fret_N` for N = 2 3 5 7 10 (the Seven Nation Army riff on the A string):
-   ```bash
-   .venv/bin/python scripts/record_poses.py --role fret --port /dev/cu.usbmodem5B790163191
-   ```
-3. **Set the press direction** in `robot/poses/fret_arm.json` → `"depth": {"joint": ..., "deg_per_mm": ...}`.
-   This is which joint pushes the tip *into* the string, and how many degrees make one mm
-   (use a negative number if the joint moves the other way). The default is `wrist_flex`, `1.0`,
-   which is a guess.
-4. **API keys** in `.env` (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Both verified working 2026-09-19.
-
-## Every session
-
-1. Camera relay in Terminal.app (it holds the camera permission):
-   `.venv/bin/python sense/camera_relay.py --index 1`
-2. Run the loop. Start with a small budget:
-   ```bash
-   .venv/bin/python -m agent.loop --role fret --backend astra --port /dev/cu.usbmodem5B790163191 --turns 8
-   ```
-   Useful flags: `--no-mic`, `--no-camera`, `--target A2`, `--goal "..."`, `--effort low|medium|high`,
-   `--fake-arm` (full loop, no hardware).
-3. **Ctrl-C** stops it: the arm goes to `rest` slowly, then torque is released. Press Ctrl-C a
-   second time to skip the rest move.
-4. Review `runs/<timestamp>-<backend>/`: `decisions.jsonl` (model text, thinking summary, tool
-   calls, scores, token usage) plus `frame_NNN.jpg` for each observation.
-
-## Astra vs Claude
-
-`--backend astra` (GPT-6 Astra) and `--backend claude` share the same tools, guards, recorder and
-prompt. In the Guitarra band harness this loop is the guitar's *rehearsal/tuning* tool: live
-performance plays pre-planned phrases locally, with no model call per note.
-
-## Tests (no hardware, no API)
+The reviewed offline suites use fakes/mocks, no model calls, and no device capture:
 
 ```bash
-.venv/bin/python -m pytest tests/ -q
+# From the guitarra repository root
+guitar/.venv/bin/python -m pytest guitar/tests/test_motions.py guitar/tests/test_embodied.py -q
 ```
+
+Synthetic audio tests test code on synthetic signals, not the real guitar or a model critic.
+The recorder currently writes JSONL and JPEGs under `guitar/runs/`; it does not implement
+persisted attempt-audio export, structured evaluator feedback, best-plan selection, or
+validated replay. Those belong to the target [rehearsal loop](../REHEARSAL_LOOP.md).

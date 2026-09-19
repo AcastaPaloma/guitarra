@@ -1,5 +1,10 @@
 # SDK commissioning and physical demonstration — 2026-09-19 UTC
 
+> **Separate lamp workstream and recorded session evidence.** These device operations,
+> calibration facts, and test counts do not qualify the guitar arms. Current guitar
+> requirements/status are [DESIGN](guitar/DESIGN.md) and [STATUS](guitar/STATUS.md), with
+> operator rules in [AGENTS.md](AGENTS.md). The historical report is preserved below.
+
 Latest continuation: an external runtime restart restored stock idle. A new
 82-second recording demonstrated movement on all five axes, including the elbow.
 No new dance, recording session, or torque change was commanded by the agent.

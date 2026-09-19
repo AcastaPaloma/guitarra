@@ -1,4 +1,10 @@
-# Rehearsal commands and remaining commissioning
+# Lamp rehearsal commands and remaining commissioning
+
+> **Separate lamp workstream.** The commands below compile/commission lamp scenes and
+> are not the current guitar rehearsal instructions. The guitar uses
+> [guitar/REHEARSAL_LOOP.md](guitar/REHEARSAL_LOOP.md) and [guitar/DESIGN.md](guitar/DESIGN.md),
+> with [AGENTS.md](AGENTS.md) controlling hardware permissions. Preserve the original
+> lamp evidence; do not run its commands as guitar setup.
 
 Current hardware state and results are in [SDK_COMMISSIONING.md](SDK_COMMISSIONING.md).
 The new continuous candidate and research are in [DANCE_CONTINUITY.md](DANCE_CONTINUITY.md).

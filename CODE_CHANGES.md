@@ -1,4 +1,9 @@
-# Performance candidate changes
+# Lamp performance candidate changes
+
+> **Separate lamp workstream / historical implementation record.** The source changes,
+> simulation cues, and test counts below are not evidence that the current guitar loop is
+> complete. Guitar requirements/status live in [DESIGN](guitar/DESIGN.md) and
+> [STATUS](guitar/STATUS.md). The original change record is preserved below.
 
 Current continuation: see [SDK_COMMISSIONING.md](SDK_COMMISSIONING.md) for deployed
 SDK/idle repair, supervised physical results, recorder fixes, and 33 regression

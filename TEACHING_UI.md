@@ -1,4 +1,9 @@
-# Teach dashboard
+# Lamp Teach dashboard
+
+> **Separate lamp workstream.** This dashboard, device address, and torque procedure are
+> not a UI or setup path for the guitar arms. Follow [guitar/DESIGN.md](guitar/DESIGN.md),
+> [guitar/SETUP.md](guitar/SETUP.md), and [AGENTS.md](AGENTS.md) for the current guitar task.
+> The existing lamp guide is otherwise retained.
 
 Open [Teach on the lamp](http://192.168.0.226:8080/#teach) from a laptop on the
 same network. The hostname alternative is

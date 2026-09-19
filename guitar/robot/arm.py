@@ -111,7 +111,6 @@ class Arm:
         speed = float(np.clip(speed, 0.2, 1.0))
         start = self._read()
         check_at(self.last_cmd, start, AT_TOLERANCE_DEG)
-        self._before_motion()
         # the gripper is a clamp holding the tool, never part of a motion
         waypoints = [dict(wp, gripper=start["gripper"]) for wp in waypoints]
         segments, cur = [], start
@@ -124,7 +123,8 @@ class Arm:
             cur = wp
         check_segments([start] + [seg[2] for seg in segments])
         plans = [(kind, interpolate(a, b, MAX_DEG_PER_S * speed)) for kind, a, b in segments]
-        check_trajectory([q for _, traj in plans for q in traj], self.limits, dt=1 / CONTROL_HZ)
+        check_trajectory([start] + [q for _, traj in plans for q in traj], self.limits, dt=1 / CONTROL_HZ)
+        self._before_motion()  # no servo writes until the complete trajectory passes
 
         t_cmd = None
         for kind, traj in plans:
@@ -225,7 +225,13 @@ class Arm:
 
 
 class RealArm(Arm):
-    def __init__(self, port: str, arm_id: str, motor_id_offset: int = 0):
+    def __init__(self, port: str, arm_id: str, motor_id_offset: int = 0, *, base_mode: str = "speed"):
+        # Keep the legacy default for existing scripts. New callers should choose explicitly:
+        # position for a working servo; speed only for the documented faulty-servo workaround.
+        if base_mode not in ("position", "speed"):
+            raise ValueError("base_mode must be 'position' or 'speed'")
+        self.base_mode = base_mode
+        self.base = None
         super().__init__(arm_id)
         from lerobot_robot_astra import AstraSO101, AstraSO101Config
 
@@ -245,29 +251,43 @@ class RealArm(Arm):
         r = self.robot
         if not r.calibration:
             raise RuntimeError(f"'{self.arm_id}' is not calibrated - run lerobot-calibrate first (CONNECT.md 5b)")
+        self._hard_box()  # reject bad saved calibration before enabling any torque
+        for joint, cal in r.calibration.items():
+            if cal.id != r.bus.motors[joint].id:
+                raise GuardError(f"{joint}: calibration motor ID does not match the configured arm")
         r.bus.connect()
-        if not r.is_calibrated:
-            r.bus.write_calibration(r.calibration)
-        # Hold the current position before torque comes on, so enabling torque can't jump
-        # the arm to a stale Goal_Position left over from an earlier session. Gripper excluded:
-        # it is clamped on the tool, and goal=present would stop it squeezing.
-        present = r.bus.sync_read("Present_Position", normalize=False)
-        r.bus.sync_write("Goal_Position", {m: v for m, v in present.items() if m != "gripper"}, normalize=False)
-        r.configure()      # PID on the body joints, then torque on (gripper torque untouched)
-        # The base servo's own position mode is broken (drives one way); run it in speed mode
-        # with software position control instead (robot/base_speed.py).
-        from .base_speed import SpeedBase
-        self.base = SpeedBase(r.bus)
-        self.base.enable()
-        grip = r.clamp_gripper()
-        if not grip["squeezing"]:
-            log.warning(f"gripper is not squeezing anything: {grip} - check the fingertip/pick")
-        super().connect()
+        try:
+            if not r.is_calibrated:
+                raise GuardError("servo calibration differs from the saved file; verify/calibrate explicitly first")
+            # Validate the current pose and workspace before any writes.
+            super().connect()
+            check_trajectory([self.last_cmd], self.limits, dt=1 / CONTROL_HZ)
+        except BaseException:
+            r.bus.disconnect(disable_torque=False)
+            raise
+        try:
+            # Hold current position, never a stale goal. The gripper remains a tool clamp.
+            present = r.bus.sync_read("Present_Position", normalize=False)
+            r.bus.sync_write("Goal_Position", {m: v for m, v in present.items() if m != "gripper"}, normalize=False)
+            r.configure()
+            if self.base_mode == "speed":
+                from .base_speed import SpeedBase
+                self.base = SpeedBase(r.bus)
+                self.base.enable()
+            grip = r.clamp_gripper()
+            if not grip["squeezing"]:
+                log.warning(f"gripper is not squeezing anything: {grip} - check the fingertip/pick")
+            self.last_cmd = self._read()
+        except BaseException:
+            self.disconnect()
+            raise
 
     def _before_motion(self) -> None:
         self.robot.reassert_grip()
 
     def _move_base(self, traj: list[Pose], speed: float) -> None:
+        if self.base_mode == "position":
+            return super()._move_base(traj, speed)
         self.base.vmax = min(25.0, MAX_DEG_PER_S * speed)
         self.base.move_to(traj[-1][BASE])
 
@@ -278,8 +298,9 @@ class RealArm(Arm):
         return q
 
     def _send(self, q: Pose) -> None:
-        # the base is driven only by _move_base (speed mode); never send it a position goal
-        self.robot.send_action({f"{j}.pos": v for j, v in q.items() if j != BASE})
+        # In speed mode the base must never receive a position goal.
+        self.robot.send_action({f"{j}.pos": v for j, v in q.items()
+                                if j != BASE or self.base_mode == "position"})
 
     def disconnect(self) -> None:
         if self.robot.is_connected:

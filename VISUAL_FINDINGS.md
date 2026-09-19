@@ -1,4 +1,9 @@
-# Visual performance session — 2026-09-19 UTC
+# Lamp visual performance session — 2026-09-19 UTC
+
+> **Separate lamp workstream / session evidence.** The camera findings, device state,
+> candidate motion, and simulated guitar cues below do not define current guitar scope or
+> qualify its physical hardware. See [guitar/DESIGN.md](guitar/DESIGN.md) and
+> [guitar/STATUS.md](guitar/STATUS.md). This recorded evidence is retained unchanged below.
 
 **Current update:** authenticated SDK commissioning and camera-supervised motion
 are now working. See [SDK commissioning](SDK_COMMISSIONING.md) for subsequent

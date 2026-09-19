@@ -1,4 +1,9 @@
-# Hand-guided action library
+# Hand-guided lamp action library
+
+> **Separate lamp workstream.** The recorded vocabulary and hand-guidance procedure below
+> apply to that lamp, not the guitar's grippers or calibration. Current guitar requirements
+> are [guitar/DESIGN.md](guitar/DESIGN.md); follow [AGENTS.md](AGENTS.md) for its tool-clamp
+> and thermal rules. This documentation is preserved, not a guitar-training prerequisite.
 
 The laptop-accessible [Teach tab](TEACHING_UI.md) provides start/end recording,
 save-only behavior, automatic take numbering, a saved bank, and click-to-replay.

@@ -1,10 +1,30 @@
-# tunefinder
+# tunefinder — standalone reference tool
 
-Listen to a tune. Get back a timed, single-note melody transcription with every tab note arranged on the D string.
+> **Not a current guitar runtime or fine-tuning dependency.** The active
+> [design](../DESIGN.md) uses defined guitar tools and bounded pretrained-model rehearsal.
+> This preserved input/transcription tool is not the new audio evaluator or arm controller.
+> Commands below describe this standalone component, not required guitar setup.
 
-The hard part is not pitch detection. It is that the fretboard is ambiguous. Middle C sits in four places on a standard guitar, and a tab that picks each note independently produces something no hand and no machine can physically play. tunefinder picks the whole fretting path at once.
+Listen to a tune. Get back a timed, single-note melody transcription, arranged on the D
+string by default. The arranger chooses a fretting path under musical heuristics; that
+is not proof of playability, collision clearance, or timing on the physical arms.
+
+## Integration boundary
+
+This tool's internal index 0 is low E, and its tab tokens use `E` for low E and `e` for
+high E. The physical motion API instead uses string numbers 6–1 and spot names `e` for
+low E and `E` for high E. Its supplied map covers frets 1–9, not arbitrary frets or all
+outputs of this arranger. Never pass this tool's raw string indices/tokens to the arms.
+
+Any deliberately approved future input integration must translate conventions, validate
+qualified notes/transitions, and disclose octave folding or timing changes. It is not
+needed to begin the current rehearsal loop, and none is claimed implemented here.
 
 ## Install
+
+These are standalone transcriber instructions. Run from `guitar/Note Transcriber/` in
+an appropriate separate environment, not as a modification to a working servo-driver
+setup. Preview audio is synthesized, not a robot performance.
 
 ```bash
 pip install librosa soundfile numpy scipy
@@ -97,7 +117,7 @@ Each note token is `STRING-FRET`: the string letter and the fret, open strings w
 
 Each note becomes a set of candidate fretboard positions. The arranger chooses a continuous path that respects the fret span, finger limit, tuning, capo, and open-string settings.
 
-A Viterbi search then runs over the whole piece. Emission cost is shape difficulty: fret height, stretch, number of fingers, with a bonus for open strings and a penalty for barres. Transition cost is hand travel: distance moved along the neck, strings the picking arm crosses, with a reward for fingers that stay planted.
+A Viterbi search then runs over the whole piece. Emission cost is shape difficulty: fret height, stretch, number of fingers, with a bonus for open strings and a penalty for barres. Transition cost is estimated hand travel along the neck and between strings, with a reward for fingers that stay planted. These are arrangement costs, not calibrated two-arm execution times or physical chord capability.
 
 The weights live in `CostWeights` and can be tuned for a preferred playing style. Raising `hand_shift` favours fewer position changes; raising `string_travel` favours staying on nearby strings.
 

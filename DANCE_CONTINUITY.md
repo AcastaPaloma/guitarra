@@ -1,5 +1,10 @@
 # Continuous dance: findings and candidate
 
+> **Separate lamp workstream.** These continuity experiments and measurements are not
+> guitar trajectory/latency evidence or a guitar implementation prerequisite. The current
+> guitar design is [guitar/DESIGN.md](guitar/DESIGN.md); its status is
+> [guitar/STATUS.md](guitar/STATUS.md). The original lamp findings remain below.
+
 The post-restart stock idle was recorded for 82 seconds. All five encoders moved,
 including a 28.304-unit elbow span. This contradicts treating the elbow as an
 immobile/dead axis. It does not establish accurate target tracking, mechanical

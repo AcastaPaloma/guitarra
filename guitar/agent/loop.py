@@ -1,6 +1,6 @@
 """Embodied loop: the model sees camera + audio score, calls tools, guards run them on the arm.
 
-    python -m agent.loop --role fret --backend astra --port /dev/cu.usbmodem5B790163191
+    python -m agent.loop --role fret --backend baseten --port /dev/cu.usbmodem5B790163191
     python -m agent.loop --role fret --backend scripted --fake-arm          # no API, no arm
 
 Roles (current wiring, verified 2026-09-19): fret arm = IDs 7-12 on /dev/cu.usbmodem5B790163191
@@ -76,7 +76,9 @@ def load_env(path: Path) -> None:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+                v = v.strip().strip('"').strip("'")
+                if v:
+                    os.environ.setdefault(k.strip(), v)
 
 
 class Recorder:
@@ -100,7 +102,7 @@ class Recorder:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", default="claude", help="claude | astra | scripted")
+    ap.add_argument("--backend", default="claude", help="claude | astra | baseten | scripted")
     ap.add_argument("--model", help="override the backend's default model id")
     ap.add_argument("--effort", default="medium")
     ap.add_argument("--port")

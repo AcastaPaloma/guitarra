@@ -1,81 +1,88 @@
-# sense/ — what Astra hears and sees
+# Sensing — existing measurements and optional model assessment
 
-Decisions so far (2026-09-15):
-- Guitar: **electric, unplugged**. Quiet, thin signal → mic must be close (MacBook at bridge
-  height, ~20–30 cm from the strings). Expect SNR to be the main problem, not pitch.
-- Audio input: MacBook built-in mic via `sounddevice`, default device, 44.1 kHz mono.
-- Camera: MacBook camera at bridge height, one frame per turn, sent to Astra with the scorer.
-- Dev mode: live capture only; validate by strumming by hand.
+Current scope is [model-guided guitar rehearsal](../DESIGN.md), not a newly trained sound
+classifier. Use camera observations and, when enabled with consent, real attempt recordings.
+A pretrained audio-capable evaluator can critique a clip; the planner can revise its next
+approved plan without changing either model's weights.
 
-## Scorer outputs (chosen)
-1. **Onset count / snag detection** — number of distinct string onsets inside the strum window.
-   Clean sweep ≈ 5–6 onsets within ~150 ms; a snag shows as 1–2 onsets then a gap; too shallow
-   shows as 0. Needs a noise-floor estimate first (see Calibration).
-2. **Timing / rhythm accuracy** — for multi-strum patterns: onset time of the first string vs the
-   expected beat time. Requires a shared clock between the interpolator (when the strum was
-   commanded) and the audio buffer (when it was heard). Report `offset_ms` per strum.
+## 1. What is implemented
 
-Implicitly required by both (they fall out for free):
-- RMS over the window → "did it ring at all" and the noise floor.
-- (Recommended, not yet chosen) chroma vs target chord → tells Astra *which end* of the strum
-  fell short, which is the direction signal for `depth_mm`. Onset count alone says "3 strings"
-  but not which 3.
+| File | Actual behavior |
+|---|---|
+| [`camera_relay.py`](camera_relay.py) | Opens an OpenCV camera and serves localhost MJPEG/JPEG/health endpoints. Has top-level device startup; do not import it as a test helper. |
+| [`camera.py`](camera.py) | Fetches relay health and one reduced JPEG from `/astra.jpg`, rejecting an old frame according to its age check. The route name is historical, not provider-specific. |
+| [`mic.py`](mic.py) | 44.1 kHz mono ring buffer plus local level/onset/YIN-pitch estimates; not an audio-language model or trained guitar classifier. |
 
-## Modules (to be written)
-- `mic.py`      — open stream once, ring buffer; `capture(window_s)` returns the last N seconds
-                  aligned to a timestamp so timing can be measured against the command clock.
-- `onsets.py`   — noise floor, onset detection in the window, snag heuristic.
-- `timing.py`   — expected beat times from the pattern + tempo; `offset_ms` per detected onset.
-- `camera.py`   — `grab()` → one downscaled JPEG (≈768 px wide, q≈70) as bytes + base64.
-- `packet.py`   — assemble the scorer JSON string Astra gets as `function_call_output`.
-- `calibrate.py`— 2 s of silence → noise floor; 3 hand strums → onset threshold sanity print.
+`mic.py` and `camera.py` already exist. Old references to missing `sense/calibrate.py`,
+separate `onsets.py`, `timing.py`, or a completed multi-strum packet pipeline are not the
+current implementation. The agent sends a snapshot and text/tool feedback, not a continuous
+raw video/audio stream. Its recorder saves JSONL and JPEGs, not per-attempt WAV files.
 
-## Calibration (run at the table before every session)
-1. Servo whine: record 2 s with the arm holding `above_strings` under torque — that's the floor,
-   not silence. Threshold = floor × k.
-2. Hand strum 3×; print onsets and RMS. If onsets < 4 on a clean hand strum, move the laptop closer
-   or mute the room.
-3. Check macOS mic/camera permission for the terminal (nonzero RMS, non-black frame).
+## 2. Existing acoustic heuristic versus the proposed evaluator
 
-## Timing decisions
-- **Clock:** command timestamp. `t_cmd` = `time.monotonic()` captured by the interpolator the
-  instant the first `send_action` of a strum goes out. Every onset is reported relative to it.
-  No metronome, no backing track — nothing else makes sound in the room except servos.
-- **Alignment:** always-on ring buffer. `mic.py` opens one `sounddevice.InputStream` at session
-  start with a callback that appends to a ring buffer (~10 s) and stores the monotonic time of
-  the first sample. `capture(t_cmd, pre=0.1, post=1.2)` slices by time, not by "start recording
-  now" — stream-startup latency never touches the measurement.
-  Measure and subtract fixed input latency once (`stream.latency`); it's usually 10–40 ms on
-  the built-in mic.
-- **Pattern:** Astra picks it. `strum` becomes
-  `play(pattern: [{"dir":"down"|"up","at_ms":int}], depth_mm, speed)` — a list of strums with
-  intended onset times relative to the first. The interpolator executes them on that schedule
-  and records the actual `t_cmd` of each. The scorer then reports, per intended strum, the
-  nearest detected onset and `offset_ms` = heard − intended. Astra is graded against the plan
-  *it* wrote, so timing error is purely mechanical (servo lag, snag), which is what it can fix.
+`score()` currently estimates `rang`, level above the noise floor, onset count, first onset
+relative to a command reference, pitch, and target. `wait_for_pluck()` supports the single
+fretting-role loop waiting for someone to pluck.
 
-## Scorer JSON — compact (to Astra, as `function_call_output`)
-```
-{
-  "rang": true,               // rms over floor
-  "strums": [
-    {"dir":"down","onsets":5,"offset_ms":+38,"snag":false},
-    {"dir":"up",  "onsets":2,"offset_ms":+210,"snag":true}
-  ],
-  "note": "2nd strum snagged; late by 210ms"   // one-line rule-based summary
-}
-```
-Keep it to these fields. Recommended extra if chord-match is enabled later:
-`"missing":["B","E"]` per strum.
+These are useful development measurements, but their explanatory strings are hypotheses:
 
-## Scorer JSON — full (to `runs/<run>/decisions.jsonl` only)
-Everything above plus: `rms_db`, `floor_db`, `onset_times_ms` (absolute, relative to t_cmd),
-`onset_strengths`, detector params (hop, threshold, k), `t_cmd` per strum, `mic_latency_ms`,
-window bounds, and the frame filename. This is what `replay` and the dashboard read.
+- A low level does not prove the pick missed; the input may be wrong, quiet, stale, or noisy.
+- One onset does not prove a clean note; several peaks do not count strings or prove snagging.
+- A pitch mismatch does not determine which mechanical adjustment is safe.
+- The old six-string “5–6 onsets means clean” rule is not a validated guitar metric.
 
-## Snag heuristic (first cut)
-- Window per strum: `[intended_at − 60 ms, next_intended_at − 60 ms)` or +400 ms for the last.
-- `onsets` = peaks of a spectral-flux onset envelope above `floor × k` inside the window.
-- `snag` = onsets ≥ 1 and (max inter-onset gap > 120 ms or onsets < 3).
-- `offset_ms` = first onset in window − intended time; `null` if no onset.
-Tune k and the 120 ms gap against hand strums in `calibrate.py`, not against the arm.
+The proposed **audio-model evaluator** is a separate integration: encode/export a consented
+attempt clip, supply the intended phrase/rubric, call a verified audio-capable endpoint,
+and retain its observations/uncertainty. It does not require training a classifier first.
+The current Qwen2.5-VL/Baseten scaffold accepts images/text, not raw audio; its client has
+no audio field. Do not claim the planner listened to a recording when it only received a
+local score summary.
+
+## 3. Minimum new evaluator contract
+
+Inputs: the real clip, expected phrase/notes, attempt ID, relevant capture metadata, and a
+fixed comparison rubric. Outputs: recording usability, bounded observations about the
+attempt, uncertainty, and a short comparison with previous attempts where supported.
+
+The evaluator has **no motion tools**. It must not instruct arbitrary pressure, joint,
+grip, or calibration changes. A missing note may justify inspection, not a confident
+mechanical diagnosis. The planner chooses only actions that the local controller permits.
+
+If an audio-capable endpoint also accepts images, test the exact combined request before
+using it; support for each modality individually is not proof the combination works.
+Camera/video alone cannot establish acoustic quality or contact force. ASR is not a
+substitute for judging guitar sound.
+
+## 4. Capture and timing gaps to address
+
+- Select and verify the real input device/permissions; a nonempty array is not sufficient.
+- The current mic callback uses host callback-arrival time and ignores ADC timing/status.
+  Measure the timebase/input latency; do not subtract an assumed fixed latency value.
+- `capture()` waits for future data without an independent timeout and does not validate
+  retained history bounds. Add stale/dropout/overflow/window checks before autonomous use.
+- The current `t_cmd`/duration fields can omit an initial base phase and do not identify
+  physical pick contact or encoder-settled arrival. Keep intended onset, command timing,
+  sensor capture, and model assessment timestamps separate.
+- Persist attempt clips only with consent, with enough provenance to prevent evaluating
+  the wrong or replayed recording. Label synthetic/replay/operator evidence explicitly.
+- Keep capture/DSP/network work off the local control/watchdog path. A dead microphone or
+  evaluator must not leave an indefinite physical hold or start an automatic retry.
+
+These are pending code requirements, not fixes made by rewriting documentation.
+
+## 5. Practical first validation
+
+Use consented, safely obtained short guitar recordings to check capture and evaluator
+behavior before hardware integration. Include usable notes and unclear/noisy recordings;
+verify that uncertainty is reported rather than fabricated detail. This is an inference
+smoke/evaluation exercise, not a fine-tuning dataset prerequisite.
+
+When measuring precise pitch/onset performance, use separately validated signal processing
+or a suitable reference measurement. Report an audio model's rating as an assessment, not
+ground truth or proof of millisecond timing accuracy. Ordinary human listening can review
+results without being relabeled automatic sensing.
+
+The legacy [transcriber](../Note%20Transcriber/README.md) is a separate reference input tool,
+not this rehearsal evaluator or a required runtime dependency. See
+[REHEARSAL_LOOP.md](../REHEARSAL_LOOP.md) for the full feedback flow and
+[STATUS.md](../STATUS.md) for current source limitations.

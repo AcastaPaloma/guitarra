@@ -1,4 +1,12 @@
-# Guitarra: lamp frontperson and robotic guitarist
+# Lamp/band architecture — separate reference workstream
+
+> **Not the active guitar requirements.** This preserved document describes the separate
+> lamp/band effort and its historical status snapshots. Its simulated-guitar, vocal,
+> multi-performer, policy, and commissioning tasks do not apply to the current guitar-only
+> work. Use [guitar/DESIGN.md](guitar/DESIGN.md), [status](guitar/STATUS.md), and
+> [closed-loop rehearsal](guitar/REHEARSAL_LOOP.md). Model weights stay fixed in that loop;
+> [fine-tuning is deferred](guitar/FINETUNING.md). [AGENTS.md](AGENTS.md) owns current guitar
+> operator rules. The separate workstream's evidence and body below are retained.
 
 Status: the five-axis composer, SDK adapter, camera recorder and supervised commissioning tools are implemented. Authenticated SDK clips have run on the physical lamp. Small yaw, waist, roll and head movements are demonstrated; elbow response remains limited and its loaded position error prevents claiming full joint health or a commissioned dance envelope. See [SDK_COMMISSIONING.md](SDK_COMMISSIONING.md). The full 40-second style A/B and audio synchronization remain unverified.
 
