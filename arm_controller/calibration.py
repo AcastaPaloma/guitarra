@@ -28,7 +28,9 @@ from app import (BAUD, GOTO_ACC, GOTO_SPEED, JOINT_NAMES, KEYFRAMES_PATH,
 
 router = APIRouter(prefix="/api/cal")
 
-_lock = threading.Lock()
+# Shared with the rehearsal manager: reservation and calibration connection are
+# admitted atomically. RLock permits the injected play guard to inspect ownership.
+ownership_lock = _lock = threading.RLock()
 _bus = None
 _torque_on = False
 
@@ -67,7 +69,10 @@ def _load_keypoints():
 
 
 def _save_keypoints(kps):
-    KEYFRAMES_PATH.write_text(json.dumps(kps, indent=2))
+    with _lock:
+        if _play_guard():
+            raise HTTPException(409, "a rehearsal owns this calibration snapshot — finish/stop it first")
+        KEYFRAMES_PATH.write_text(json.dumps(kps, indent=2))
 
 
 class GotoReq(BaseModel):
@@ -339,10 +344,13 @@ PAGE = """<!doctype html>
 <script>
 const $ = id => document.getElementById(id);
 let connected = false, torque = false, poller = null, sliding = null;
+const session = fetch('/api/bootstrap').then(r => r.json());
 const say = (m, err) => { $('msg').textContent = m; $('msg').className = err ? 'err' : ''; };
 const api = async (path, body) => {
+  const {session_token} = await session;
   const r = await fetch('/api/cal' + path, body === undefined ? {} :
-    {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    {method:'POST', headers:{'Content-Type':'application/json', 'X-Session-Token':session_token},
+     body: JSON.stringify(body)});
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.detail || r.status);
   return d;

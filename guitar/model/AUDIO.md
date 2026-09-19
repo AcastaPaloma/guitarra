@@ -6,6 +6,13 @@ one-second synthetic PCM16/16 kHz WAV. See [audio-connection-check.json](audio-c
 That probe did not upload user media, open a device, or move a robot. It does not demonstrate
 successful audio ingestion or guitar assessment. Kimi K3 remains the working planner.
 
+**Single-arm web integration now exists:** [arm_controller/REHEARSAL.md](../../arm_controller/REHEARSAL.md)
+uses a consented browser AudioWorklet to capture a bounded take, then calls this file
+adapter and feeds a valid assessment to a bounded Kimi revision proposal. It never
+replays automatically. That integration passed offline mocked/synthetic checks only;
+no new live endpoint result or user-media upload is claimed. The older `guitar/web`
+fake console and legacy agent recorder remain separate.
+
 ## The interface
 
 `model/audio.py` reads **one operator-selected file**, validates it, converts it to a 16 kHz
@@ -21,6 +28,9 @@ There is no trimming, gain normalization, playback, or modification of the origi
 Preparation records source/upload hashes, sample rates, duration, preprocessing, and separate
 local signal-level estimates. The loader does **not** verify when/where a clip was recorded
 or whether its claimed attempt ID matches a real performance. Supply that provenance honestly.
+The new web manager separately binds one clip to a completed attempt/capture ID and
+stores browser sample-frame metadata. Its `browser_microphone` source label is a browser
+attestation, not independent device/provenance or hardware-timebase verification.
 
 ## Commands (repository root)
 
@@ -93,12 +103,15 @@ Reports have `motion_authority: false` and `is_physical_qualification: false`.
 
 1. Resolve the Inkling endpoint timeout/access issue and verify a real audio response.
 2. Assess a short consented recording and review its usefulness/uncertainty with the operator.
-3. Deliberately wire the report into Kimi's next attempt observation as **untrusted assessment
-   data**, not tool instructions. Automatic planner ingestion is not implemented yet.
-4. Add bounded capture/export and a coordinated phrase executor only after the hardware gates.
+3. Review the new single-arm web ingestion of assessments as **untrusted data**, with separate
+   telemetry and explicit operator approval of locally validated proposals. It is not wired
+   into the older CLI/two-arm runner and cannot automatically replay a robot.
+4. Qualify the relevant physical subset and independently review protection/stop behavior
+   before any real supervised web take; the current pulled keypoint file is empty.
 
-There is no live microphone capture/export, automatic rehearsal feedback loop, acoustic
-qualification, or motor-control change in this file-based integration. Camera remains off.
+This file adapter itself still opens no devices and executes no motor commands. Browser
+capture/export and review orchestration live in `arm_controller/`, not in this module.
+No live acoustic qualification or proven physical improvement is established. Camera remains off.
 See [DESIGN.md](../DESIGN.md), [REHEARSAL_LOOP.md](../REHEARSAL_LOOP.md), and [AGENTS.md](../../AGENTS.md).
 
 [Baseten audio request requirements](https://docs.baseten.co/inference/model-apis/audio)

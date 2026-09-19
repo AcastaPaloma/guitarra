@@ -37,17 +37,19 @@ it or to the fretmap interpolation pipeline while this section stands.**
 
 The v2 grid has no above/touch pairs, so there is **no hover surface** to
 translate along. Until hover keypoints exist, **every transition routes
-through `rest`**: press → rest → press. Slower than hovering, but it cannot
-scrape strings or the neck, and it cannot drag the fingertip laterally while
-in contact. If transit speed becomes a problem, record per-cell hover
-keypoints and restore the LIFT→TRANSLATE→PRESS staging (implementation is in
-this file's git history, commit d6f5d7f).
+through `rest`**: press → rest → press. This preserves the existing route;
+it is **not an unconditional collision-free guarantee**. Full swept-arm/tool
+clearance still requires operator qualification. If transit speed becomes a
+problem, record per-cell hover keypoints AND qualify the LIFT→TRANSLATE→PRESS
+transitions before offering them as local named profiles. Audio or estimated
+XYZ cannot certify those paths. Historical staging code is reference only.
 
 **The gripper (ID 12) is never commanded — not position, not torque.** It
-permanently holds the fingertip tool at deliberately limited torque
-(`grip_torque=180/1000`, just under the overload trigger — see
-`config_astra_so101.py` and `guitar/CONNECT.md`). `MOTOR_IDS` in `fret.py`
-simply doesn't contain 12.
+permanently holds the fingertip tool. **AGENTS.md overrides older settings:**
+the last operator-selected live limit is **110**, after a reported 75°C event;
+180 is the unresolved legacy plugin default, not a setting to restore. This
+raw-serial path neither sets nor reasserts grip. `MOTOR_IDS` in `fret.py` does
+not contain 12. No sustained thermal qualification is claimed.
 
 ## Press depth
 
@@ -61,6 +63,16 @@ Holds are continuous stall loads. The same overload protection that froze the
 pluck arm's elbow (torque clamps to ~20% after a ~2 s stall past the trigger)
 exists on these servos: if a press goes weak mid-hold, lift, cool, re-press.
 Keep long holds bounded and watch temps (reg 63) during long passages.
+
+## Web rehearsal changes
+
+[REHEARSAL.md](REHEARSAL.md) describes the supervised browser-mic → Baseten
+assessment → reviewed proposal integration. Speeds, dwell, and rest-hub
+routing are unchanged. Encoder-arrival timeout now **raises** instead of
+being ignored; a failed stage cannot continue into another press. The web
+executor releases **body torque only** on disconnect and adds no recovery
+homing—support the arm. The standalone CLI's close default is unchanged.
+There are no qualified direct A→B/hover shortcuts or automatic physical repeats.
 
 ## Tools
 

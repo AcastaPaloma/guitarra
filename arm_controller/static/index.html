@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guitarra</title>
+<link rel="stylesheet" href="/static/style.css">
+<script type="module" src="/static/app.js"></script>
+</head><body>
+<header><div><h1>GUITARRA</h1><p class="sub">play · listen · refine</p></div><a href="/calibrate" class="quiet-link">calibrate</a></header>
+<main>
+  <nav class="tabs" aria-label="Console"><button id="play-tab" class="active" aria-selected="true">PLAY</button><button id="history-tab" aria-selected="false">PROGRESS <span id="history-count">0</span></button></nav>
+  <p id="availability" class="notice" role="status">Checking keypoints…</p>
+
+  <div id="play-view">
+    <div class="steps" aria-label="Workflow"><span id="st1" class="on">PLAN</span><span id="st2">LISTEN</span><span id="st3">REVIEW</span><span id="st4">REFINE</span></div>
+    <section id="composer">
+      <label for="prompt">What should it play?</label>
+      <textarea id="prompt" placeholder="a song, a melody, or paste a tab…"></textarea>
+      <div class="compose-actions"><div class="examples"><button data-example="Play Hot Cross Buns">hot cross buns</button><button data-example="Play a short ascending melody">short melody</button></div><button class="btn primary" id="convert" disabled>MAKE NOTES</button></div>
+      <p class="hint">One planner request. No microphone or motion yet.</p>
+    </section>
+
+    <section id="plan" hidden>
+      <div class="section-title"><h2 id="title">Arrangement</h2><button id="change-song" class="text-button">change</button></div>
+      <div class="notes" id="notes"></div>
+      <div class="take-controls"><label>From <input id="take-start" type="number" min="1" value="1"></label><label>Take <input id="take-count" type="number" min="1" max="4" value="4"> notes</label><span class="hint">up to 4 per take</span></div>
+      <p id="selected" class="hint"></p>
+      <div id="now" hidden><b id="now-pitch">—</b><span id="now-note"></span><div class="bar"><div id="fill"></div></div><span id="count" class="hint"></span></div>
+      <div class="play-actions"><button class="btn primary" id="play" disabled>PLAY + LISTEN</button><button class="btn" id="stop" title="Cooperative stop; the current bounded tap/lift may finish. Not a physical E-stop." disabled>STOP</button><span id="recording">Mic off</span></div>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+
+    <section id="review" class="review" hidden>
+      <div class="section-title"><h2>TAKE <span id="attempt-label"></span></h2><span id="assessment-status" class="tag">waiting</span></div>
+      <audio id="recorded-audio" controls hidden></audio>
+      <p id="assessment-summary"></p>
+      <div id="proposal" hidden><p id="rationale"></p><ul id="changes"></ul></div>
+      <div class="actions"><button class="text-button" id="apply" hidden>use suggested tuning</button><button class="text-button" id="repeat" hidden>keep the previous tuning instead</button></div>
+      <details class="fine-print"><summary>Take details</summary><p id="capture-info"></p><p id="telemetry"></p><ul id="observations"></ul><ul id="limitations"></ul><ul id="inspection"></ul></details>
+    </section>
+  </div>
+
+  <section id="history-view" hidden>
+    <div class="section-title"><h2>REHEARSAL HISTORY</h2><select id="session-select" aria-label="Saved rehearsal sessions"><option value="">No saved sessions</option></select></div>
+    <p id="history-summary" class="hint">Each take keeps its audio, tuning, and review.</p>
+    <div id="trend" hidden><div class="section-title"><h3>COMMAND TIME</h3><span class="hint">seconds · same phrase/calibration only</span></div><div id="trend-bars"></div><p class="hint">Faster commands do not necessarily mean better music. Audio judgments remain uncertain.</p></div>
+    <div id="take-history"><p class="empty">Your takes will appear here.</p></div>
+    <section id="history-detail" class="review" hidden><h3 id="history-detail-title"></h3><audio id="history-audio" controls hidden></audio><p id="history-review"></p><p id="history-tuning" class="hint"></p></section>
+    <p class="hint">★ = your preferred take, not an automatic quality score. Load a saved tuning to keep rehearsing without rebuilding the song.</p>
+  </section>
+
+  <footer><span>supervised · Stop is not an E-stop · camera off</span><details><summary>Limits & device safety</summary><p>Mic access starts only after Play confirmation and ends after the take. Clips and tuning history stay in <code>guitar/runs/tap_rehearsal/</code> until you delete them. Completed clips get one Baseten audio review and up to one planner revision; incomplete clips are local-only.</p><p>Next take is operator-started—not unattended autoplay or weight retraining. Revisions are bounded in sets of three; you can explicitly start another supervised set using a saved tuning in the same session.</p><p>Support the body at disconnect: body torque turns off; gripper 12 is never commanded. Stop is cooperative (the current bounded tap/lift may finish), not a physical E-stop. Thermal/protection qualification remains unresolved.</p><p>Only rest-hub routes exist. Audio cannot certify a shorter A→B path is clear of strings. No model joint/XYZ/pressure/grip changes. Pauses are after lift, not exact acoustic onsets. Four-note / 55s execution / 60s capture limits are software bounds, not physical qualification.</p><p id="provider-status"></p></details></footer>
+</main>
+
+<dialog id="consent-dialog" aria-labelledby="consent-title">
+  <h2 id="consent-title">ONE SUPERVISED TAKE</h2>
+  <p id="confirm-description">Play, record, review—then pause for your next choice.</p>
+  <label><input type="checkbox" id="media-consent"> Record my mic, save this take, and send the completed clip to Baseten (one audio review + up to one tuning request).</label>
+  <label><input type="checkbox" id="supervised"> I checked the arm/thermal condition and am supervising. I will support the body when its torque turns off. The tool gripper is not commanded.</label>
+  <p class="hint">No automatic rerun. Allow browser microphone access when asked.</p>
+  <div class="actions"><button class="btn" id="cancel-play">CANCEL</button><button class="btn primary" id="confirm-play" disabled>START TAKE</button></div>
+</dialog>
+</body></html>

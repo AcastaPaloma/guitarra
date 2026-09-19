@@ -1,15 +1,96 @@
 # Guitar implementation status and consistency audit
 
-**Source/status snapshot, not a physical qualification report.** Baseten managed Kimi K3
-now drives a fake-only orchestration runner; all four initial workflow cases passed in a
-live paced batch. Hardware qualification remains outstanding. Audio work is parked. Requirements are in
-[DESIGN.md](DESIGN.md); current operator facts and overrides are in [../AGENTS.md](../AGENTS.md).
-Unrelated uncommitted work is preserved. The camera-off/input-policy change is implemented
-and covered by offline tests; the other source/runtime gaps below are not fixed by that change.
-**Camera input is off by default** in the CLI and Toolbox. Only explicit `--camera` enables
-optional diagnostic snapshots; `--no-camera` keeps the default. Normal planning needs no images.
+**Source/status snapshot, not a physical qualification report.** Requirements are in
+[DESIGN.md](DESIGN.md); operator facts/overrides remain in [../AGENTS.md](../AGENTS.md).
+The pulled single-arm tap web app is now the active web milestone; it is **not** the
+older fake/two-arm console. Camera remains off. No deployment, training, real motion,
+real microphone, or live inference was exercised by the new implementation checks.
 
-## 1. What exists
+## 0. Active single-arm web rehearsal (2026-09-19)
+
+Source: [`../arm_controller/webapp.py`](../arm_controller/webapp.py),
+[`rehearsal.py`](../arm_controller/rehearsal.py), [`tap_plans.py`](../arm_controller/tap_plans.py),
+and [workflow/limits](../arm_controller/REHEARSAL.md).
+
+- The working tap/fret arm (body IDs **7–11**) is the active subset of the same rig.
+  The pluck arm is out of service. Tool-gripper **12 is never commanded** by this path.
+  No old map, additional performer/arm, plugin reconnect, or camera fallback is introduced.
+- The updated app is launched at **http://127.0.0.1:8788**. The older `guitar/web` fake
+  console on **8787** and the unrelated service on **8765** are untouched.
+- **Current keypoints are empty:** the pulled calibration commit cleared
+  `arm_controller/keyframes_arm2.json` for re-recording. The backup/calibration files
+  are preserved, not automatically restored. Planning/play admission fails closed until
+  a valid current rest/key grid exists. Earlier reported successful tap playing does
+  not mean this emptied checkout is presently ready to play.
+- Play + Listen requires per-take mic/upload/inference and supervision/body-support
+  consent. Browser WebAudio/AudioWorklet capture starts and produces samples before
+  Play submission. Permission denial/cancellation, capture interruption, empty/invalid
+  audio, stopped/faulted playback, stale calibration, or expiry cannot trigger replay.
+- One **completed** take's bound WAV is validated/resampled through the existing Baseten
+  audio adapter; its assessment is passed as **untrusted data** to one bounded Kimi
+  proposal, separately from command/encoder telemetry. A successful schema/audio-token
+  response is an assessment, not proof of a clean note or qualified mechanics.
+- Software bounds: **four notes/take, 60s capture, 55s local execution budget**, one
+  audio request plus at most one text revision per take, **three explicitly started
+  attempts per revision chain**. These limits are not physical/thermal qualification.
+- Proposed changes are one category at a time: up to three post-lift pauses in 50ms
+  steps (at most ±100ms each), one adjacent event swap, or one recorded same-pitch
+  key alternative. The present 18-key set has no same-pitch alternatives. Exact
+  acoustic onset scheduling, contact-depth/XYZ changes, and new trajectories are absent.
+- **Only `rest_hub` is executable.** No qualified hover transitions exist; audio and
+  estimated XYZ cannot certify a shorter A→B path avoids unintended strings. The model
+  may request operator inspection/qualification but cannot invent/enable a path.
+- Proposals display a diff, stage the next tuning, require a separate confirmed Play,
+  expire after five minutes, and revalidate the current calibration fingerprint. No
+  automatic physical repeat, recovery move, or model tool dispatch is enabled.
+- The main UI is compact; **Progress** is separate. Persistent phrase sessions store
+  per-take WAVs/reviews/plans, tuning IDs, and an operator-preferred take. Previously
+  performed tunings can be staged/reused without rebuilding the song; new captures and
+  fresh admission are mandatory. One session can continue across explicitly supervised
+  revision sets (100 takes/session), not unattended budget resets. Restart never resumes
+  motion/capture/inference. A bounded last-three-attempt text history reaches the planner.
+- Progress compares command durations for the same pitch order/calibration only, separately
+  from uncertain categorical audio judgments. No calibrated quality/improvement score or
+  automatic “best” claim. Human preference is labeled as human, not model qualification.
+- Runtime corrections: raw `fret.py` encoder timeouts now raise rather than silently
+  continuing. Web playback disconnects with **body torque off** before inference
+  (**support the body**); it does not open/reassert grip or home on faults. This differs
+  from the old web player's body-torque-on cleanup. The standalone CLI default is unchanged.
+- Cooperative Stop/heartbeat watchdog blocks subsequent taps and discards late model
+  results; a current bounded tap/lift may finish. It is **not** an independent hardware
+  E-stop or thermal/electrical monitor. The recorded 75°C incident/live 110 setting and
+  legacy plugin default/reassertion issues remain unresolved. No unattended loops.
+- WAV + structured reports are private local, Git-ignored files under
+  `guitar/runs/tap_rehearsal/<UUID>/`. Source/capture alignment is browser-attested and
+  approximate, not independently verified hardware/ADC provenance. No automatic retention
+  cleanup; delete/share recordings deliberately. Keys stay server-side. Received partial
+  buffers on Stop/device interruption can be archived locally, marked incomplete, and
+  are **never** uploaded to the evaluator. Denied/no samples/tab loss/upload failure can
+  leave a take without audio. Archived audio reads require the local token and reject
+  path traversal/symlinks. Sessions/favorites live in `tap_rehearsal/sessions/`.
+
+**Verification:** **188 Python checks passed** (67 new single-arm checks + 121 existing).
+Three Node PCM/worklet checks also passed (WAV encoding, startup readiness, and rejection
+of post-readiness render gaps/missing input). Six browser cases passed using an
+oscillator-generated MediaStream and mocked HTTP/motor/
+model results: two successive reviewed takes with cached tuning/favorite/history/reload,
+denial, late permission after Stop, stop during playback, provider-unavailable feedback,
+and mic disconnect. Stop/disconnect kept local-only partial buffers. All tracks closed;
+no JS errors or mobile/desktop horizontal overflow. Private, explicitly synthetic evidence:
+`guitar/runs/tap-browser-check.json` and `tap-browser-check-{play,history}-{1100,390}.png`. No paid API/device test occurred.
+
+**Audio remains live-unverified:** the last Inkling probe still timed out; see
+[model/audio-connection-check.json](model/audio-connection-check.json). No new successful
+listening, useful guitar critique, physical improvement, or thermal qualification is claimed.
+A consented non-motion endpoint check and separately approved supervised physical take are
+still needed after keypoint and protection readiness. The browser loop is implemented in
+source and offline fixtures; it is not a demonstrated live autonomous rehearsal.
+
+## 1. Earlier `guitar/` source audit (separate legacy/fake paths)
+
+The following audit describes the older CLI and fake two-arm orchestration, **not** the
+new `arm_controller/` tap app. References below to parked/unintegrated audio, fake-only web,
+or missing two-arm execution apply to those paths; §0 supersedes them for the new web source.
 
 | Component | Source evidence | Limit |
 |---|---|---|
@@ -30,8 +111,9 @@ optional diagnostic snapshots; `--no-camera` keeps the default. Normal planning 
 | Microphone/scorer | [`mic.py`](sense/mic.py) | 44.1 kHz ring buffer and handcrafted pitch/onset/level heuristics; **not** a pretrained audio-model evaluator |
 | Run log | `Recorder` in `agent/loop.py` | JSONL includes selected input modes; JPEGs only for opt-in frames. No persisted per-attempt WAV/evaluator contract in this recorder |
 
-No complete audio-evaluator feedback loop, qualified two-arm performance, fine-tuned model,
-or custom Baseten deployment is established. The live Kimi K3 result verifies managed provider
+No **live-verified** audio-evaluator feedback loop, qualified two-arm performance, fine-tuned
+model, or custom Baseten deployment is established. The new single-arm software loop and
+its offline verification are described in §0; the legacy paths in this table remain separate. The live Kimi K3 result verifies managed provider
 connectivity/tool continuation only. Historical Astra/Claude requests remain separate traffic.
 
 ## 2. Hardware and runtime blockers

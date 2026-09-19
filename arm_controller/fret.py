@@ -22,8 +22,13 @@ fret map; do NOT fall back to guitar/robot/poses/fret_arm.json):
 Transitions are staged through lifted hubs, never sliding on the board:
   LIFT to the current row's hub -> travel to the target row's hub (if the
   row changed) -> PRESS. Rows without a recorded 'rest-r{R}' hub fall back
-  to the global 'rest'. First motion after connect always routes via a hub
-  from 'rest'-ward, so the arm can never scrape across strings or neck.
+  to the global 'rest' (the web executor's injected snapshot carries no row
+  hubs, so it always routes press -> rest -> press). First motion after
+  connect always routes via a hub from 'rest'-ward, so the arm can never
+  scrape across strings or neck. This is NOT a collision-free guarantee;
+  recorded poses and the full swept path still need operator qualification.
+  Audio/XYZ estimates cannot establish clearance. Never invent a shortcut
+  from a model recommendation.
 ==============================================================================
 
 XYZ deduction/extrapolation lives in gridfit.py: bilinear fits over the
@@ -69,12 +74,15 @@ _CELL_T = re.compile(r"pose[-_]?c(\d+)[-_]?r(\d+)$")  # transposed name variant
 _ROW_REST = re.compile(r"rest[-_]?r(\d+)$")
 
 
-def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET):
+def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
     """-> {"cells": {(string, fret): raw_pose}, "rest": pose,
            "row_rests": {fret: pose}, "xyz": {(string, fret): xyz_cm dict},
-           "degrees": {(string, fret): {sid: deg}}, "warns": [str]}"""
+           "degrees": {(string, fret): {sid: deg}}, "warns": [str]}
+
+    entries optionally supplies an already-read local snapshot (never model data).
+    """
     cells, xyz, degrees, row_rests, rest, warns = {}, {}, {}, {}, None, []
-    for k in json.loads(Path(path).read_text()):
+    for k in entries if entries is not None else json.loads(Path(path).read_text()):
         name = k["name"].strip().lower()
         pose = {int(sid): int(v) for sid, v in k["positions"].items() if int(sid) in MOTOR_IDS}
         if name == "rest":
@@ -107,42 +115,73 @@ def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET):
             "xyz": xyz, "degrees": degrees, "warns": warns}
 
 
-def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET):
+def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
     """Back-compat view: -> (cells, rest_pose, warnings)."""
-    m = load_map(path, max_fret)
+    m = load_map(path, max_fret, entries=entries)
     return m["cells"], m["rest"], m["warns"]
 
 
 class FretArm:
-    def __init__(self, port=FRET_PORT, baud=BAUD):
-        m = load_map()
-        self.cells, self.rest_pose, self.warnings = m["cells"], m["rest"], m["warns"]
-        self.row_rests, self.xyz = m["row_rests"], m["xyz"]
+    def __init__(self, port=FRET_PORT, baud=BAUD, *, grid=None):
+        if grid is not None:
+            # The web executor supplies a validated immutable snapshot, not model
+            # poses. The (cells, rest, warns) view carries no row hubs or xyz, so
+            # every transition routes through the global rest hub.
+            self.cells, self.rest_pose, self.warnings = grid
+            self.row_rests, self.xyz = {}, {}
+        else:
+            m = load_map()
+            self.cells, self.rest_pose, self.warnings = m["cells"], m["rest"], m["warns"]
+            self.row_rests, self.xyz = m["row_rests"], m["xyz"]
         self.bus = FeetechBus(port, baud)
-        alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
-        if len(alive) < len(MOTOR_IDS):
-            raise RuntimeError(f"fret arm motors responding: {alive} of {MOTOR_IDS} — check power")
-        for sid in alive:
-            self.bus.set_torque(sid, True)
+        try:
+            alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
+            if len(alive) < len(MOTOR_IDS):
+                raise RuntimeError(f"fret arm motors responding: {alive} of {MOTOR_IDS} — check power")
+            for sid in alive:
+                self.bus.set_torque(sid, True)
+        except Exception:
+            self.close(torque_off=True)  # BODY motors only, never the tool gripper
+            raise
         self.holding = None  # (string, fret) or None
         self.last_row = None  # fret row the arm last worked in (None = unknown)
 
     def close(self, torque_off=False):
-        if torque_off:  # only when the arm is physically supported
-            for sid in MOTOR_IDS:
-                self.bus.set_torque(sid, False)
-        self.bus.close()
+        # Operator supports the body for a normal torque-off disconnect. No homing
+        # here, and no all-motors/broadcast torque command (gripper 12 is absent).
+        error = None
+        try:
+            if torque_off:
+                for sid in MOTOR_IDS:
+                    try:
+                        self.bus.set_torque(sid, False)
+                    except Exception as exc:
+                        error = exc
+        finally:
+            self.bus.close()
+        if error:
+            raise error
 
-    def _move(self, pose, speed, wait=True):
+    def _move(self, pose, speed, wait=True, *, deadline=None):
+        if set(pose) != set(MOTOR_IDS) or any(type(v) is not int or not 0 <= v <= 4095
+                                            for v in pose.values()):
+            raise ValueError("A complete recorded body-joint pose is required")
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("Attempt deadline reached before a motion stage")
         for sid, pos in pose.items():
             self.bus.goto(sid, pos, speed=speed, acc=ACC)
         if wait:
-            deadline = time.time() + SETTLE_TIMEOUT
-            while time.time() < deadline:
+            stage_deadline = time.monotonic() + SETTLE_TIMEOUT
+            if deadline is not None:
+                stage_deadline = min(stage_deadline, deadline)
+            while time.monotonic() < stage_deadline:
                 if all((p := self.bus.read_pos(sid)) is not None and abs(p - t) <= SETTLE_TOL
                        for sid, t in pose.items()):
-                    return True
+                    return True  # encoder tolerance only, not string/contact evidence
                 time.sleep(0.03)
+            # Previously this returned False which every caller ignored, and the
+            # next press still ran. A failed stage must stop without recovery moves.
+            raise TimeoutError("Encoder arrival timed out; state uncertain")
         return False
 
     def _cell(self, string, fret):
@@ -169,20 +208,42 @@ class FretArm:
 
     # ---- tools ----------------------------------------------------------
 
-    def tap_key(self, string, fret):
-        """Tap (string, fret): fast press to sound the note, brief dwell, lift.
+    def tap_key(self, string, fret, *, deadline=None):
+        """Existing rest -> tap -> rest path, unchanged speeds/contact dwell.
 
         The only way this rig makes sound now — the tap impact is the attack.
-        Staged via lifted row hubs (scrape-safe)."""
+        Staged via lifted row hubs (scrape-safe); without recorded row hubs
+        (e.g. the web executor's injected snapshot) every hub is the global
+        rest, giving the press -> rest -> press path in exactly three motion
+        stages.
+
+        A cooperative Stop finishes this bounded tap/lift, then blocks the next
+        tap. It is NOT a motor emergency stop. A timeout raises immediately with
+        no subsequent motion or automatic rest. Timings below are encoder/command
+        observations, NOT verified contact or acoustic onsets.
+        """
         s, f = int(string), int(fret)
         pose = self._cell(s, f)
-        self._stage(f)
-        self._move(pose, TAP_SPEED)                # fast press = the note
+        started, stages = time.monotonic(), []
+
+        def stage(name, target, speed):
+            command = time.monotonic() - started
+            self._move(target, speed, deadline=deadline)
+            stages.append({"stage": name, "command_start_s": round(command, 4),
+                           "encoder_ready_s": round(time.monotonic() - started, 4)})
+
+        lift_hub = self._hub(self.last_row) if self.last_row is not None else self.rest_pose
+        stage("lift", lift_hub, TRAVEL_SPEED)
+        if self.last_row != f and self._hub(f) is not lift_hub:
+            stage("travel", self._hub(f), TRAVEL_SPEED)
+        stage("tap", pose, TAP_SPEED)                # fast press = the note
         time.sleep(TAP_DWELL_S)
-        self._move(self._hub(f), TRAVEL_SPEED)     # lift back into the row hub
+        stage("lift_clear", self._hub(f), TRAVEL_SPEED)
         self.holding, self.last_row = None, f
-        return {"status": "tapped", "string": s, "fret": f,
-                "note_open": STRING_NOTES.get(s), "xyz_cm": self.xyz.get((s, f))}
+        return {"status": "command_completed", "string": s, "fret": f,
+                "note_open": STRING_NOTES.get(s), "stages": stages,
+                "xyz_cm": self.xyz.get((s, f)),
+                "acoustic_success": "unknown", "contact_verified": False}
 
     def tap_sequence(self, keys, gap_s=0.3):
         """Tap several (string, fret) keys in order with a fixed gap."""
@@ -228,8 +289,8 @@ TOOLS = [
                        "onto the fret, brief dwell, lift back to rest). This is "
                        "the only way this rig makes sound. String 1 = high E "
                        "(rightmost) ... 6 = low E (leftmost); ONLY frets 1-3 are "
-                       "mapped. Transit is scrape-safe (routes via rest); "
-                       "callers never plan paths.",
+                       "mapped. Transit uses the existing rest hub; full paths "
+                       "still require operator qualification. Callers never plan paths.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -242,7 +303,7 @@ TOOLS = [
     {
         "name": "tap_sequence",
         "description": "Tap several keys in order with a fixed gap between taps. "
-                       "Same mapping and safety guarantees as tap_key.",
+                       "Same mapping and rest-hub constraints as tap_key.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -266,7 +327,7 @@ TOOLS = [
         "description": "Press and HOLD a string at a fret (no tap attack — "
                        "quiet press, e.g. to mute or prep). Stays pressed until "
                        "release_fret or another hold_fret. Same mapping as "
-                       "tap_key; transit is scrape-safe.",
+                       "tap_key; transit uses the existing rest hub.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -316,7 +377,7 @@ TOOLS = [
     },
     {
         "name": "fret_rest",
-        "description": "Fretting arm to its recorded rest pose (parked, safe).",
+        "description": "Fretting arm to its recorded rest pose; operator-qualified paths required.",
         "parameters": {"type": "object", "properties": {}},
     },
 ]

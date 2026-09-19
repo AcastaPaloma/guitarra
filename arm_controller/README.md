@@ -25,12 +25,33 @@ uv run --with pyserial python fret.py --seq 1,1 2,2   # tap a sequence
 
 Close the GUI before running `fret.py` — the serial port is exclusive.
 
-### Web calibration (preferred over the GUI)
+### Web console: planning, recording, and reviewed rehearsal
 
 ```bash
-uv run --no-project --with fastapi --with uvicorn --with pyserial \
-    python webapp.py --port 8787    # then open http://127.0.0.1:8787/calibrate
+# From the REPOSITORY ROOT, with the existing web/audio environment:
+guitar/.venv/bin/python arm_controller/webapp.py --port 8788
+# Console: http://127.0.0.1:8788
+# Calibration: http://127.0.0.1:8788/calibrate
 ```
+
+**[REHEARSAL.md](REHEARSAL.md)** documents Play + Listen: a consented browser
+microphone records one short supervised take, the separate Baseten audio model
+reviews it, and the planner proposes locally bounded changes for explicit approval.
+The main UI stays compact; a separate **Progress** tab retains per-take audio,
+reviews, cached tuning versions, and your preferred take across sessions/restarts.
+Play Next Take continues from a staged revision or a saved performed tuning without
+rebuilding the song; previous outcomes reach the planner as bounded context.
+No automatic physical replay, camera, raw-joint model paths, or gripper commands.
+The web player now releases **body torque only** at disconnect—support the body.
+Runtime dependencies include jsonschema, NumPy, and SciPy as well as FastAPI,
+Uvicorn, pyserial, and the existing Python/Tk support.
+
+**Pulled-checkout blockers:** `keyframes_arm2.json` is empty (cleared for
+re-recording); no backup is restored automatically. The Inkling evaluator's
+last live probe timed out. Offline tests do not qualify either the endpoint
+or physical motion. The old fake console on 8787 is a different app.
+
+### Web calibration (preferred over the GUI)
 
 CONNECT → torque OFF → pose by hand → CAPTURE. Once the kinematic reference
 pose is captured (see `kinematics.py` for the measured geometry), every

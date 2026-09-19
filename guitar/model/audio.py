@@ -177,8 +177,8 @@ def evaluate_file(path: Path, *, expected_phrase: str, attempt_id: str,
         raise ValueError("attempt_id must be 1-64 letters/digits/dots/underscores/hyphens")
     if not isinstance(expected_phrase, str) or not 1 <= len(expected_phrase.strip()) <= 4000:
         raise ValueError("Provide the intended phrase in 1-4000 characters")
-    if source not in {"operator_recording", "synthetic_fixture"}:
-        raise ValueError("Label source as operator_recording or synthetic_fixture")
+    if source not in {"operator_recording", "browser_microphone", "synthetic_fixture"}:
+        raise ValueError("Label source as operator_recording, browser_microphone, or synthetic_fixture")
     clip = prepare_clip(path)
     load_env()
     model = os.environ.get("BASETEN_AUDIO_MODEL") or DEFAULT_AUDIO_MODEL
