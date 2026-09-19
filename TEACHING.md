@@ -1,5 +1,9 @@
 # Hand-guided action library
 
+For the new laptop-accessible **Teach** tab, see [TEACHING_UI.md](TEACHING_UI.md).
+It provides recording, save-only behavior, an automatically numbered take bank,
+and click-to-replay. Its backend activation is a supervised one-time restart.
+
 The installed runtime already records five joint coordinates and timestamps at
 a target 30 Hz through its existing motor owner. No second serial process is
 needed. The upstream [LeLamp control guide](https://github.com/humancomputerlab/LeLamp/blob/master/docs/5.%20LeLamp%20Control.md)
@@ -30,6 +34,49 @@ seam can be chosen from the middle instead of the hand placement at either end.
 
 A dozen good takes can support many compositions. Every tempo/amplitude variant
 still needs trajectory validation; multiplying amplitude is not automatically safe.
+
+## First recording session
+
+The live dashboard was checked on 2026-09-19. Open **Controls → Record
+Animation** for hand-guided capture, or **Motion Animations** for existing clips.
+The installed library already includes `nod`, `look_left`, `look_or_turn_left`,
+`look_or_turn_right`, `dance`, `dance_2`, and `robot_dance`. The names below are
+new recording names, not playable clips yet. None existed in the live library
+at the time of the check. Check again before capture; the recorder can overwrite
+an existing name. Use `t02`, `t03`, etc. for additional takes.
+
+| Recording name | Demonstration | Role in a dance |
+|---|---|---|
+| `teach_upright_neutral_t01` | Hold a comfortable supported upright pose for 2–3 seconds | Reference for discrete gesture starts and finishes |
+| `teach_nod_t01` | One gentle nod, then return | Beat or phrase accent |
+| `teach_look_left_t01` | Look to the lamp's left, then return | Attention cue |
+| `teach_look_right_t01` | Look to the lamp's right, then return | Attention cue |
+| `teach_head_tilt_t01` | One small curious tilt, then return | Expression between phrases |
+| `teach_sway_t01` | Two flowing left/right cycles | Repeating groove |
+| `teach_bounce_t01` | Two gentle rise/fall cycles | Beat pulse |
+| `teach_signature_t01` | 8–12 seconds of a comfortable coordinated groove | Main dance phrase |
+| `teach_bow_t01` | Small controlled bow, then return | Ending |
+
+Record at a comfortable pace and keep the original timing. Note the intended
+beat count or metronome tempo if one is used; neither the file name nor the
+dashboard's estimated duration establishes musical timing. For discrete
+gestures, hold the reference pose briefly at each end. For loops, keep moving
+through both cycles so a later edit can select a continuous seam.
+
+The existing dashboard has two capture steps: **Record** releases motor torque;
+**Start** begins sampling. Support the head and arms before pressing Record,
+and confirm torque is actually released before guiding the lamp. The current
+**Stop** saves the CSV and requests torque restoration; Stop during preparation
+also requests torque restoration. Plan that powered handoff before beginning:
+the UI currently has no save-only control, and powering the motors may resume
+idle. Do not treat Stop as an inert save button. Use the supervised handoff
+protocol below; the separate save-only runtime candidate is still undeployed.
+
+Saved clips appear in **Motion Animations** after refresh. Selecting a clip
+there commands playback. First review the recorded timestamps, joint ranges,
+and entry/exit poses, then validate the trajectory and its entry before a
+supervised replay. A recorded loop is not automatically safe to repeat, and
+the dance composer does not yet import these takes or join them into a scene.
 
 ## Capture and replay handoff
 
