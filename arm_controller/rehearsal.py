@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 from model.audio import evaluate_file, prepare_clip
+from model.baseten import BasetenError
 from pydantic import Field
 from tap_history import (
     MAX_SESSION_TAKES,
@@ -490,10 +491,20 @@ class RehearsalManager:
                     return
                 self._phase(attempt, "revising", timeout=65)
             history = self.archive.planner_context(record["session_id"], record["attempt_id"])
-            revision = self.revise(plan, attempt.registry["keys"], assessment, copy.deepcopy(record["telemetry"]),
-                                   history=history,
-                                   allowed_profiles=attempt.registry.get("path_profiles", ("rest_hub",)),
-                                   acoustic_metrics=copy.deepcopy(metrics))
+            try:
+                revision = self.revise(plan, attempt.registry["keys"], assessment,
+                                       copy.deepcopy(record["telemetry"]), history=history,
+                                       allowed_profiles=attempt.registry.get("path_profiles", ("rest_hub",)),
+                                       acoustic_metrics=copy.deepcopy(metrics))
+            except BasetenError:
+                # A rejected/invalid planner reply must not discard the take: the
+                # assessment and measurements are already saved — land on inspect
+                # (no proposed changes) instead of a blank "unavailable".
+                with self.lock:
+                    self._finish(attempt, "inspect",
+                                 "Planner reply invalid/unavailable; review and measurements "
+                                 "saved, no proposed changes")
+                return
             with self.lock:
                 if attempt.stop.is_set():
                     self._finish(attempt, "stopped", record["error"])
