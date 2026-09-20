@@ -178,9 +178,10 @@ function showArrangement(notes, title, profile, rhythm) {
   $('title').textContent = title + (rhythm?.tempo_bpm
     ? ` · ♩=${rhythm.tempo_bpm}${rhythm.rhythm_stretched ? ` (played at ~${rhythm.effective_bpm} — hardware-paced, relative rhythm kept)` : ''}`
     : '');
+  const beatsVary = new Set(arrangement.map(n => n.beats ?? 1)).size > 1;
   $('notes').replaceChildren(...arrangement.map((n, i) => {
     const node = textNode('div', '', 'note');
-    const beats = typeof n.beats === 'number' && n.beats !== 1 ? ` · ${n.beats}♪` : '';
+    const beats = beatsVary && typeof n.beats === 'number' ? ` · ${n.beats}♪` : '';
     node.append(textNode('b', `s${n.string}·f${n.fret}`), textNode('span', `${i + 1}. ${pitch(n)} · ${n.arm}${beats}`));
     return node;
   }));

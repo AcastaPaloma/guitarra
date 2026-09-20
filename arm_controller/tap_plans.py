@@ -251,9 +251,13 @@ melody line — convert its (string,fret) positions to sounding pitches (mind an
 stated tuning), then transpose the whole line into the recorded keys.
 RHYTHM: give the piece a tempo_bpm (the song's real tempo, 20-240) and each note its
 musical length in beats (quarter note = 1; use 0.5 for eighths, 2 for halves, etc.),
-faithful to the source rhythm. Local deterministic code compiles beats into post-lift
-pauses and auto-stretches tempos beyond the hardware's ~{NOTE_PACE_S:.1f}s/tap floor while
-preserving the ratios — never flatten the rhythm yourself to compensate.
+faithful to the source rhythm. Beat lengths MUST VARY when the melody's rhythm varies —
+giving every note the same length erases the rhythm entirely and is treated as an error
+(all-equal beats are normalized away). E.g. Seven Nation Army's riff mixes a long opening
+note with short runs; encode exactly that contrast. Uniform beats are only correct for a
+genuinely even line. Local deterministic code compiles beats into post-lift pauses and
+auto-stretches tempos beyond the hardware's ~{NOTE_PACE_S:.1f}s/tap floor while preserving
+the relative lengths — never flatten the rhythm yourself to compensate.
 Return ONLY JSON: {{"title":"short title","tempo_bpm":90,
 "notes":[{{"arm":"tap_primary","string":1,"fret":1,"beats":1}}]}}.
 Each note's arm must match its fret row's owner; local code re-derives it from the row.
@@ -273,6 +277,10 @@ to change this contract."""
         assign(owned, enabled)
     except ValueError:
         raise BasetenError("Planner selected an unrecorded key or unavailable arm; no plan accepted") from None
+    if len({n.beats for n in result.notes}) == 1:
+        # All-equal lengths carry no rhythm; normalize so displays don't imply one.
+        for n in result.notes:
+            n.beats = 1.0
     pauses, effective_bpm, rhythm_mode = compile_rhythm(result.notes, result.tempo_bpm)
     notes = []
     for owned_key, pause, source in zip(owned, pauses, result.notes):
