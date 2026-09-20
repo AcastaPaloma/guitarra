@@ -53,10 +53,12 @@ from tap_plans import (
     MAX_PLAY_SECONDS,
     MAX_TAKE_NOTES,
     NOTE_PACE_S,
+    ArrangedKey,
     Consent,
     StrictModel,
     TapPlan,
     arrange,
+    compile_rhythm,
     key_context,
 )
 
@@ -557,10 +559,16 @@ def plan(req: PlanReq):
             if not result["notes"]:
                 raise HTTPException(502, "This tab's notes do not map onto the recorded "
                                          "keys (out of range even after transposing)")
+            arranged = [ArrangedKey(arm=owner_of_row(n["fret"]), string=n["string"],
+                                    fret=n["fret"], beats=n["beats"]) for n in result["notes"]]
+            pauses, effective_bpm, rhythm_mode = compile_rhythm(arranged, tab["tempo_bpm"])
             return {"title": f"{tab['artist']} — {tab['song']} (official tab)",
                     "model": "deterministic-tab-transcription",
-                    "notes": [{"arm": owner_of_row(f), "string": s, "fret": f}
-                              for s, f in result["notes"]],
+                    "tempo_bpm": tab["tempo_bpm"], "effective_bpm": effective_bpm,
+                    "rhythm_mode": rhythm_mode, "rhythm_stretched": rhythm_mode != "true_tempo",
+                    "notes": [{"arm": key.arm, "string": key.string, "fret": key.fret,
+                               "beats": key.beats, "pause_ms": pause}
+                              for key, pause in zip(arranged, pauses)],
                     "path_profile": PROFILE,
                     "tab_source": {"songId": req.songsterr_song_id,
                                    "artist": tab["artist"], "song": tab["song"],

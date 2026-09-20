@@ -120,17 +120,30 @@ def fetch_track_notes(song_id, track=None):
             for beat in voice.get("beats") or []:
                 if beat.get("rest"):
                     continue
+                duration = beat.get("duration")
+                beats_len = 1.0
+                if (isinstance(duration, (list, tuple)) and len(duration) == 2
+                        and all(isinstance(x, int) and x > 0 for x in duration)):
+                    beats_len = max(0.125, min(8.0, 4 * duration[0] / duration[1]))
                 for note in (beat.get("notes") or [])[:1]:  # melody: top note
                     if note.get("rest") or note.get("tie"):
                         continue
                     string, fret = note.get("string"), note.get("fret")
                     if isinstance(string, int) and isinstance(fret, int) and fret >= 0:
-                        notes.append({"measure": measure_number,
+                        notes.append({"measure": measure_number, "beats": beats_len,
                                       "string": string + 1, "fret": fret})
     if not notes:
         raise SongsterrError("No playable notes found in this track")
     tuning = data.get("tuning") or meta["tracks"][index].get("tuning") or []
+    tempo_bpm = 90
+    for measure in measures:
+        candidate = measure.get("tempo")
+        bpm = candidate.get("bpm") if isinstance(candidate, dict) else candidate
+        if isinstance(bpm, (int, float)) and 20 <= bpm <= 400:
+            tempo_bpm = int(min(240, max(20, bpm)))
+            break
     return {"song": str(meta.get("title", "")), "artist": str(meta.get("artist", "")),
+            "tempo_bpm": tempo_bpm,
             "track_name": str(data.get("name", "")), "track_index": index,
             "tuning": tuning, "standard_tuning": tuning == STANDARD_TUNING,
             "notes": notes[:MAX_NOTES], "total_notes": len(notes)}
@@ -214,7 +227,7 @@ def transcribe(tab, keys, max_notes=64):
                 continue
             pick = sorted(key_by_midi[nearest])[0]
             approximated += 1
-        notes.append(pick)
+        notes.append({"string": pick[0], "fret": pick[1], "beats": note.get("beats", 1.0)})
     return {"notes": notes, "transpose": transpose, "exact": exact,
             "approximated": approximated, "dropped": dropped, "total": len(events)}
 

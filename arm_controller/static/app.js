@@ -347,7 +347,7 @@ function resetReview() {
   lastReview = null; $('review').hidden = false; $('proposal').hidden = true;
   $('apply').hidden = true; $('repeat').hidden = true;
   $('assessment-status').textContent = 'recording';
-  for (const id of ['assessment-summary', 'capture-info', 'telemetry']) $(id).textContent = '';
+  for (const id of ['assessment-summary', 'capture-info', 'telemetry', 'round-diff']) $(id).textContent = '';
   for (const id of ['observations', 'limitations', 'changes', 'inspection']) $(id).replaceChildren();
   $('recorded-audio').pause(); $('recorded-audio').removeAttribute('src'); $('recorded-audio').hidden = true;
   $('history-audio').pause(); $('history-audio').hidden = true;
@@ -527,6 +527,9 @@ async function runTake() {
     }
     running = false;
     if (sessionId) await refreshHistory(sessionId).catch(() => {});
+    // Surface "what changed since the previous round" right in the review panel.
+    const takes = sessionHistory?.takes || [];
+    if (takes.length >= 2) $('round-diff').textContent = takeDiff(takes[takes.length - 1], takes[takes.length - 2]);
     await refreshSessions().catch(() => {}); controls();
   }
 }

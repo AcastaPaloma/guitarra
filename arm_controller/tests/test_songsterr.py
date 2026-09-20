@@ -38,9 +38,10 @@ def test_fetch_track_notes_extracts_melody_line(monkeypatch):
     # picks the guitar track (index 1), skips rests/ties, takes the top note per beat,
     # converts to string 1 = high E
     assert tab["track_index"] == 1 and tab["standard_tuning"] is True
-    assert tab["notes"] == [{"measure": 1, "string": 1, "fret": 3},
-                            {"measure": 1, "string": 2, "fret": 2},
-                            {"measure": 2, "string": 4, "fret": 5}]
+    assert tab["notes"] == [{"measure": 1, "beats": 1.0, "string": 1, "fret": 3},
+                            {"measure": 1, "beats": 1.0, "string": 2, "fret": 2},
+                            {"measure": 2, "beats": 1.0, "string": 4, "fret": 5}]
+    assert tab["tempo_bpm"] == 90  # fixture has no tempo marking
 
 
 def test_condense_flags_non_standard_tuning(monkeypatch):
@@ -74,14 +75,14 @@ RIG_KEYS = {(s, f) for s in range(1, 7) for f in range(1, 4)}
 def tab_of(notes, tuning=songsterr.STANDARD_TUNING):
     return {"song": "S", "artist": "A", "track_name": "T", "track_index": 0,
             "tuning": tuning, "standard_tuning": tuning == songsterr.STANDARD_TUNING,
-            "notes": notes, "total_notes": len(notes)}
+            "tempo_bpm": 90, "notes": notes, "total_notes": len(notes)}
 
 
 def test_transcribe_keeps_exact_string_and_fret_for_in_range_notes():
     notes = [{"measure": 1, "string": 3, "fret": 2}, {"measure": 1, "string": 1, "fret": 1},
              {"measure": 2, "string": 6, "fret": 3}]
     result = songsterr.transcribe(tab_of(notes), RIG_KEYS)
-    assert result["notes"] == [(3, 2), (1, 1), (6, 3)]
+    assert result["notes"] == [{"string": 3, "fret": 2, "beats": 1.0}, {"string": 1, "fret": 1, "beats": 1.0}, {"string": 6, "fret": 3, "beats": 1.0}]
     assert result["transpose"] == 0 and result["exact"] == 3
     assert result["approximated"] == 0 and result["dropped"] == 0
 
@@ -94,7 +95,7 @@ def test_transcribe_transposes_whole_line_to_fit_the_rig():
              {"measure": 1, "string": 1, "fret": 15}]
     result = songsterr.transcribe(tab_of(notes), RIG_KEYS)
     assert result["transpose"] == -12 and result["exact"] == 3
-    assert result["notes"] == [(1, 1), (1, 2), (1, 3)]
+    assert result["notes"] == [{"string": 1, "fret": 1, "beats": 1.0}, {"string": 1, "fret": 2, "beats": 1.0}, {"string": 1, "fret": 3, "beats": 1.0}]
 
 
 def test_transcribe_respects_non_standard_tuning():
@@ -102,7 +103,7 @@ def test_transcribe_respects_non_standard_tuning():
     drop = [m - 2 for m in songsterr.STANDARD_TUNING]
     result = songsterr.transcribe(
         tab_of([{"measure": 1, "string": 1, "fret": 3}], tuning=drop), RIG_KEYS)
-    assert result["notes"] == [(1, 1)] and result["exact"] == 1
+    assert result["notes"] == [{"string": 1, "fret": 1, "beats": 1.0}] and result["exact"] == 1
 
 
 def test_transcribe_drops_only_truly_unreachable_notes():
@@ -111,7 +112,7 @@ def test_transcribe_drops_only_truly_unreachable_notes():
              {"measure": 1, "string": 6, "fret": 1}]  # ~24 semitones apart
     result = songsterr.transcribe(tab_of(notes), keys)
     assert result["exact"] == 1 and result["dropped"] == 1
-    assert result["notes"] == [(1, 1)]
+    assert result["notes"] == [{"string": 1, "fret": 1, "beats": 1.0}]
 
 
 def test_plan_with_tab_is_deterministic_no_model_call(client, monkeypatch):  # noqa: F811
@@ -133,8 +134,9 @@ def test_plan_with_tab_is_deterministic_no_model_call(client, monkeypatch):  # n
     assert response.status_code == 200
     data = response.json()
     assert data["model"] == "deterministic-tab-transcription"
-    assert data["notes"] == [{"arm": "tap_primary", "string": 1, "fret": 1},
-                             {"arm": "tap_primary", "string": 2, "fret": 2}]
+    assert data["notes"] == [{"arm": "tap_primary", "string": 1, "fret": 1, "beats": 1.0, "pause_ms": 0},
+                             {"arm": "tap_primary", "string": 2, "fret": 2, "beats": 1.0, "pause_ms": 0}]
+    assert data["tempo_bpm"] == 90 and data["rhythm_mode"] == "uniform_floor"
     assert data["path_profile"] == "lift_first"
     assert data["transcription"]["exact"] == 2 and data["transcription"]["transpose"] == 0
     assert data["tab_source"]["song"] == "S"

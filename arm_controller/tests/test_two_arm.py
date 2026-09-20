@@ -414,6 +414,7 @@ def test_tab_transcription_uses_union_of_available_keys_and_derives_arm(client, 
     monkeypatch.setattr(webapp, "read_registry", lambda: registry)
     tab = {"song": "S", "artist": "A", "track_name": "T", "track_index": 0,
            "tuning": songsterr.STANDARD_TUNING, "standard_tuning": True,
+           "tempo_bpm": 90,
            "notes": [{"measure": 1, "string": 1, "fret": 1},
                      {"measure": 1, "string": 6, "fret": 7}], "total_notes": 2}
     monkeypatch.setattr(webapp.songsterr, "fetch_track_notes", lambda song_id, track=None: tab)
@@ -422,8 +423,8 @@ def test_tab_transcription_uses_union_of_available_keys_and_derives_arm(client, 
     response = client.post("/api/plan", json={"prompt": "play S", "allow_inference": True,
                                               "songsterr_song_id": 7})
     assert response.status_code == 200, response.text
-    assert response.json()["notes"] == [{"arm": PRIMARY, "string": 1, "fret": 1},
-                                        {"arm": SECONDARY, "string": 6, "fret": 7}]
+    assert response.json()["notes"] == [{"arm": PRIMARY, "string": 1, "fret": 1, "beats": 1.0, "pause_ms": 0},
+                                        {"arm": SECONDARY, "string": 6, "fret": 7, "beats": 1.0, "pause_ms": 0}]
     assert response.json()["transcription"]["exact"] == 2
 
 
