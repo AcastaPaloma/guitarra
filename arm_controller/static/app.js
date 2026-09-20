@@ -126,7 +126,7 @@ function showArrangement(notes, title, profile) {
   $('title').textContent = title;
   $('notes').replaceChildren(...arrangement.map((n, i) => {
     const node = textNode('div', '', 'note');
-    node.append(textNode('b', pitch(n)), textNode('span', `${i + 1}. s${n.string} f${n.fret}`));
+    node.append(textNode('b', `s${n.string}·f${n.fret}`), textNode('span', `${i + 1}. ${pitch(n)}`));
     return node;
   }));
   $('take-start').max = arrangement.length; $('take-start').value = 1;
@@ -253,8 +253,8 @@ function resetReview() {
 function showProgress(record, offset) {
   $('now').hidden = false;
   const note = record.plan.notes[record.index];
-  $('now-pitch').textContent = note ? pitch(note) : '…';
-  $('now-note').textContent = note ? `s${note.string} · f${note.fret}` : 'preparing';
+  $('now-pitch').textContent = note ? `s${note.string} · f${note.fret}` : '…';
+  $('now-note').textContent = note ? pitch(note) : 'preparing';
   if (record.phase === 'playing') {
     const now = performance.now() / 1000;
     if (noteTrack.index !== record.completed_notes) {
@@ -503,7 +503,7 @@ async function listenTake(take) {
   $('history-audio').hidden = false; $('history-detail').hidden = false;
   $('history-detail-title').textContent = `TAKE ${take.take_number}${take.audio_incomplete ? ' · INCOMPLETE, LOCAL ONLY' : ''}`;
   $('history-review').textContent = take.assessment?.summary || take.error || 'No audio assessment.';
-  $('history-tuning').textContent = `Tuning ${take.tuning_id} · ${take.plan.notes.map(n => `${pitch(n)} (${n.pause_ms}ms pause)`).join(' → ')} · rest-hub`;
+  $('history-tuning').textContent = `Tuning ${take.tuning_id} · ${take.plan.notes.map(n => `s${n.string}f${n.fret} ${pitch(n)} (${n.pause_ms}ms pause)`).join(' → ')} · ${(take.plan.path_profile || 'rest_hub').replace('_', '-')}`;
 }
 
 $('session-select').onchange = async () => {
