@@ -300,19 +300,30 @@ def plan(req: PlanReq):
     if not _plan_lock.acquire(blocking=False):
         raise RehearsalError("An arrangement request is already pending; no duplicate inference")
     try:
-        tab_context = None
         if req.songsterr_song_id is not None:
+            # Official-tab mode is DETERMINISTIC: the tab's notes are mapped
+            # pitch-exactly onto the recorded keys by local code (one global
+            # transpose, nearest-pitch fallback). No model call, so the notes
+            # can never be paraphrased.
             try:
                 tab = songsterr.fetch_track_notes(req.songsterr_song_id, req.songsterr_track)
             except songsterr.SongsterrError as exc:
                 raise HTTPException(502, f"Songsterr: {exc}") from None
-            tab_context = songsterr.condense(tab)
-        result = arrange(req.prompt, registry["keys"], tab_context)
-        if tab_context:
-            result["tab_source"] = {"songId": req.songsterr_song_id,
-                                    "artist": tab["artist"], "song": tab["song"],
-                                    "track": tab["track_name"]}
-        return result
+            result = songsterr.transcribe(tab, registry["keys"], max_notes=MAX_NOTES)
+            if not result["notes"]:
+                raise HTTPException(502, "This tab's notes do not map onto the recorded "
+                                         "keys (out of range even after transposing)")
+            return {"title": f"{tab['artist']} — {tab['song']} (official tab)",
+                    "model": "deterministic-tab-transcription",
+                    "notes": [{"string": s, "fret": f} for s, f in result["notes"]],
+                    "path_profile": "rest_hub",
+                    "tab_source": {"songId": req.songsterr_song_id,
+                                   "artist": tab["artist"], "song": tab["song"],
+                                   "track": tab["track_name"]},
+                    "transcription": {k: result[k] for k in
+                                      ("transpose", "exact", "approximated",
+                                       "dropped", "total")}}
+        return arrange(req.prompt, registry["keys"])
     except (BasetenError, ValueError):
         raise HTTPException(502, "Baseten planning unavailable or invalid response; no automatic retry") from None
     finally:

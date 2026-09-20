@@ -68,25 +68,71 @@ def test_tab_search_endpoint(client, monkeypatch):  # noqa: F811
     assert client.get("/api/tabs/search", params={"pattern": ""}).status_code == 400
 
 
-def test_plan_passes_tab_context_to_arranger(client, monkeypatch):  # noqa: F811
-    captured = {}
+RIG_KEYS = {(s, f) for s in range(1, 7) for f in range(1, 4)}
+
+
+def tab_of(notes, tuning=songsterr.STANDARD_TUNING):
+    return {"song": "S", "artist": "A", "track_name": "T", "track_index": 0,
+            "tuning": tuning, "standard_tuning": tuning == songsterr.STANDARD_TUNING,
+            "notes": notes, "total_notes": len(notes)}
+
+
+def test_transcribe_keeps_exact_string_and_fret_for_in_range_notes():
+    notes = [{"measure": 1, "string": 3, "fret": 2}, {"measure": 1, "string": 1, "fret": 1},
+             {"measure": 2, "string": 6, "fret": 3}]
+    result = songsterr.transcribe(tab_of(notes), RIG_KEYS)
+    assert result["notes"] == [(3, 2), (1, 1), (6, 3)]
+    assert result["transpose"] == 0 and result["exact"] == 3
+    assert result["approximated"] == 0 and result["dropped"] == 0
+
+
+def test_transcribe_transposes_whole_line_to_fit_the_rig():
+    # frets 8-10 on string 1 are far above the rig's range; one global -7
+    # (or octave-preferred) shift must map ALL notes at exact pitches.
+    notes = [{"measure": 1, "string": 1, "fret": 13},
+             {"measure": 1, "string": 1, "fret": 14},
+             {"measure": 1, "string": 1, "fret": 15}]
+    result = songsterr.transcribe(tab_of(notes), RIG_KEYS)
+    assert result["transpose"] == -12 and result["exact"] == 3
+    assert result["notes"] == [(1, 1), (1, 2), (1, 3)]
+
+
+def test_transcribe_respects_non_standard_tuning():
+    # whole-step-down tuning: string 1 fret 3 sounds like standard fret 1
+    drop = [m - 2 for m in songsterr.STANDARD_TUNING]
+    result = songsterr.transcribe(
+        tab_of([{"measure": 1, "string": 1, "fret": 3}], tuning=drop), RIG_KEYS)
+    assert result["notes"] == [(1, 1)] and result["exact"] == 1
+
+
+def test_transcribe_drops_only_truly_unreachable_notes():
+    keys = {(1, 1)}  # rig knows a single pitch
+    notes = [{"measure": 1, "string": 1, "fret": 1},
+             {"measure": 1, "string": 6, "fret": 1}]  # ~24 semitones apart
+    result = songsterr.transcribe(tab_of(notes), keys)
+    assert result["exact"] == 1 and result["dropped"] == 1
+    assert result["notes"] == [(1, 1)]
+
+
+def test_plan_with_tab_is_deterministic_no_model_call(client, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(webapp, "read_registry",
+                        lambda: {"keys": RIG_KEYS, "grid": None, "row_rests": {},
+                                 "path_profiles": ("rest_hub",), "fingerprint": "x",
+                                 "warnings": []})
     monkeypatch.setattr(webapp.songsterr, "fetch_track_notes",
-                        lambda song_id, track=None: {"song": "S", "artist": "A",
-                                                     "track_name": "T", "track_index": 0,
-                                                     "tuning": songsterr.STANDARD_TUNING,
-                                                     "standard_tuning": True,
-                                                     "notes": [{"measure": 1, "string": 1, "fret": 1}],
-                                                     "total_notes": 1})
+                        lambda song_id, track=None: tab_of(
+                            [{"measure": 1, "string": 1, "fret": 1},
+                             {"measure": 1, "string": 2, "fret": 2}]))
 
-    def fake_arrange(prompt, keys, tab_context=None):
-        captured["tab"] = tab_context
-        return {"title": "t", "model": "m",
-                "notes": [{"string": 1, "fret": 1, "pause_ms": 250}],
-                "path_profile": "rest_hub"}
+    def no_model(*args, **kwargs):
+        raise AssertionError("tab mode must not call the arrangement model")
 
-    monkeypatch.setattr(webapp, "arrange", fake_arrange)
+    monkeypatch.setattr(webapp, "arrange", no_model)
     response = client.post("/api/plan", json={"prompt": "play S", "allow_inference": True,
                                               "songsterr_song_id": 7})
     assert response.status_code == 200
-    assert response.json()["tab_source"] == {"songId": 7, "artist": "A", "song": "S", "track": "T"}
-    assert captured["tab"].startswith("OFFICIAL TAB (Songsterr): A — S")
+    data = response.json()
+    assert data["model"] == "deterministic-tab-transcription"
+    assert data["notes"] == [{"string": 1, "fret": 1}, {"string": 2, "fret": 2}]
+    assert data["transcription"]["exact"] == 2 and data["transcription"]["transpose"] == 0
+    assert data["tab_source"]["song"] == "S"

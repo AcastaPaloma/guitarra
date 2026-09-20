@@ -185,9 +185,13 @@ $('convert').onclick = async () => {
     parentId = sourceId = sessionId = null; lastReview = null; sessionHistory = null; rememberSession();
     $('review').hidden = true; $('history-count').textContent = '0';
     showArrangement(result.notes, result.title);
-    say(result.tab_source
-      ? `Arranged from the official tab: ${result.tab_source.artist} — ${result.tab_source.song}. Play + listen.`
-      : 'Choose a short phrase, then play + listen.');
+    if (result.transcription) {
+      const t = result.transcription;
+      const shift = t.transpose ? ` · transposed ${t.transpose > 0 ? '+' : ''}${t.transpose} semitones to fit the rig` : '';
+      const rough = t.approximated ? ` · ${t.approximated} nearest-pitch` : '';
+      const cut = t.dropped ? ` · ${t.dropped} out-of-range dropped` : '';
+      say(`Official tab transcribed note-for-note: ${t.exact} exact of ${t.total}${rough}${cut}${shift}. Play + listen.`);
+    } else say('Choose a short phrase, then play + listen.');
   } catch (error) { say(error.message, true); }
   finally { running = false; controls(); }
 };

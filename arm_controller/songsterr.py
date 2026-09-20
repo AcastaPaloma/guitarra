@@ -162,14 +162,78 @@ def condense(tab):
     return "\n".join(lines)
 
 
+def _rig_midi(string, fret):
+    """Sounding pitch of a rig key, assuming the guitar is standard-tuned."""
+    return STANDARD_TUNING[string - 1] + fret
+
+
+APPROX_SEMITONES = 3  # nearest-pitch fallback window; beyond this a note is dropped
+
+
+def transcribe(tab, keys, max_notes=64):
+    """DETERMINISTIC note-for-note mapping of a Songsterr tab onto the rig.
+
+    Each tab note's sounding pitch (its track tuning + fret) is matched to the
+    recorded key with the SAME pitch — so on a standard-tuned tab, an in-range
+    note keeps its exact string and fret. One global semitone transpose is
+    chosen to maximize exact pitch coverage (octave shifts preferred on ties);
+    unmatched notes fall back to the nearest recorded pitch within
+    APPROX_SEMITONES, else are dropped. No model is involved.
+
+    -> {"notes": [(string, fret)...], "transpose": semitones, "exact": n,
+        "approximated": n, "dropped": n, "total": n}
+    """
+    tuning = tab.get("tuning") or STANDARD_TUNING
+    events = [(note, tuning[note["string"] - 1] + note["fret"]) for note in tab["notes"]]
+    key_by_midi = {}
+    for string, fret in keys:
+        key_by_midi.setdefault(_rig_midi(string, fret), []).append((string, fret))
+    if not key_by_midi or not events:
+        return {"notes": [], "transpose": 0, "exact": 0, "approximated": 0,
+                "dropped": len(events), "total": len(events)}
+
+    def coverage(offset):
+        return sum(1 for _, midi in events if midi + offset in key_by_midi)
+
+    transpose = max(range(-36, 37),
+                    key=lambda d: (coverage(d), d % 12 == 0, -abs(d)))
+    notes, exact, approximated, dropped = [], 0, 0, 0
+    for note, midi in events:
+        if len(notes) >= max_notes:
+            break
+        target = midi + transpose
+        if target in key_by_midi:
+            candidates = key_by_midi[target]
+            # exact pitch: keep the tab's own string when that key has it
+            pick = next((k for k in candidates if k[0] == note["string"]), candidates[0])
+            exact += 1
+        else:
+            nearest = min(key_by_midi, key=lambda m: (abs(m - target), m))
+            if abs(nearest - target) > APPROX_SEMITONES:
+                dropped += 1
+                continue
+            pick = sorted(key_by_midi[nearest])[0]
+            approximated += 1
+        notes.append(pick)
+    return {"notes": notes, "transpose": transpose, "exact": exact,
+            "approximated": approximated, "dropped": dropped, "total": len(events)}
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--search")
     ap.add_argument("--notes", type=int, metavar="SONGID")
     ap.add_argument("--track", type=int, default=None)
+    ap.add_argument("--transcribe", type=int, metavar="SONGID",
+                    help="deterministic (string,fret) transcription onto the 18-key rig")
     a = ap.parse_args()
     if a.search:
         print(json.dumps(search(a.search), indent=2))
     if a.notes:
         tab = fetch_track_notes(a.notes, a.track)
         print(condense(tab))
+    if a.transcribe:
+        rig_keys = {(s, f) for s in range(1, 7) for f in range(1, 4)}
+        tab = fetch_track_notes(a.transcribe, a.track)
+        result = transcribe(tab, rig_keys)
+        print(json.dumps(result, indent=2))

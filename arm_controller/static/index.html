@@ -16,8 +16,8 @@
       <label for="prompt">What should it play?</label>
       <textarea id="prompt" placeholder="a song, a melody, or paste a tab…"></textarea>
       <div class="compose-actions"><div class="examples"><button data-example="Play Hot Cross Buns">hot cross buns</button><button data-example="Play a short ascending melody">short melody</button></div><button class="btn primary" id="convert" disabled>MAKE NOTES</button></div>
-      <div class="tab-row"><button class="btn" id="find-tab" title="Search Songsterr for the official tab and arrange from it instead of memory.">FIND OFFICIAL TAB</button><select id="tab-results" hidden></select></div>
-      <p class="hint">One planner request. No microphone or motion yet. With an official tab selected, MAKE NOTES arranges from that tab's melody line.</p>
+      <div class="tab-row"><button class="btn" id="find-tab" title="Search Songsterr for the official tab and transcribe it note-for-note instead of arranging from memory.">FIND OFFICIAL TAB</button><select id="tab-results" hidden></select></div>
+      <p class="hint">One planner request. No microphone or motion yet. With an official tab selected, MAKE NOTES transcribes it note-for-note (deterministic — no model), transposing only to fit the rig's range.</p>
     </section>
 
     <section id="plan" hidden>
