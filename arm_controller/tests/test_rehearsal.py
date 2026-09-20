@@ -35,7 +35,8 @@ def evaluate(*args, **kwargs):
             "summary": "Offline fixture only.", "observations": [], "limitations": ["Mock model, synthetic audio."]}}
 
 
-def revise(take, keys, assessment, telemetry, *, history=None, allowed_profiles=("rest_hub",)):
+def revise(take, keys, assessment, telemetry, *, history=None, allowed_profiles=("rest_hub",),
+           acoustic_metrics=None):
     notes = [{**n.model_dump(), "source_index": i} for i, n in enumerate(take.notes)]
     notes[0]["pause_ms"] += 50
     proposal = Proposal(decision="revise", rationale="Offline fixture proposal.", notes=notes,

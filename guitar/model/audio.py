@@ -20,7 +20,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator, ValidationError
 
-from .baseten import BasetenClient, BasetenError, load_env
+from .baseten import BasetenClient, BasetenError, BasetenRequestError, load_env
 
 DEFAULT_AUDIO_MODEL = "thinkingmachines/inkling"
 AUDIO_MODELS = {DEFAULT_AUDIO_MODEL, "thinkingmachines/inkling-small"}
@@ -223,9 +223,21 @@ def evaluate_file(path: Path, *, expected_phrase: str, attempt_id: str,
         ]},
     ]
     started = time.monotonic()
+    response_format = {"type": "json_schema", "json_schema": {
+        "name": "guitar_audio_assessment", "strict": True, "schema": ASSESSMENT_SCHEMA}}
     try:
-        response = client.chat(messages, response_format={"type": "json_schema", "json_schema": {
-            "name": "guitar_audio_assessment", "strict": True, "schema": ASSESSMENT_SCHEMA}})
+        try:
+            response = client.chat(messages, response_format=response_format)
+        except BasetenRequestError as exc:
+            if exc.status_code is not None or model == "thinkingmachines/inkling-small":
+                raise
+            # The primary deployment is unreachable (hang/connection, not a 4xx):
+            # one fallback to the small variant so the take still gets reviewed.
+            model = record["model"] = "thinkingmachines/inkling-small"
+            record["model_fallback_from"] = client.model
+            client = BasetenClient(model=model, effort="high", max_tokens=4096,
+                                   timeout_s=client.timeout_s)
+            response = client.chat(messages, response_format=response_format)
         assessment = parse_assessment(response)
         usage = response.get("usage") or {}
         if not isinstance(usage, dict):

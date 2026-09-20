@@ -262,12 +262,25 @@ function showReview(record) {
   lastReview = record;
   $('attempt-label').textContent = String(record.take_number || record.attempt_number);
   const assessment = record.assessment;
-  $('assessment-status').textContent = assessment
-    ? `${typeof assessment.score === 'number' ? `take score ${assessment.score}/10 · ` : ''}notes ${rating(assessment.notes_match)} · timing ${rating(assessment.timing_match)}`
-    : 'review unavailable';
+  const measured = record.acoustic_metrics?.summary;
+  const heardLine = measured
+    ? `measured: heard ${measured.notes_heard}/${measured.notes_planned}` +
+      (measured.pitch_matched ? ` · pitch match ${measured.pitch_matched}` : '') +
+      (measured.mean_clarity_db != null ? ` · clarity ~${measured.mean_clarity_db}dB` : '') +
+      (measured.onset_jitter_ms != null ? ` · timing jitter ${measured.onset_jitter_ms}ms` : '')
+    : null;
+  $('assessment-status').textContent = [
+    measured ? `heard ${measured.notes_heard}/${measured.notes_planned}` : null,
+    assessment && typeof assessment.score === 'number' ? `score ${assessment.score}/10` : null,
+    assessment ? `notes ${rating(assessment.notes_match)} · timing ${rating(assessment.timing_match)}` : 'review unavailable',
+  ].filter(Boolean).join(' · ');
   $('assessment-summary').textContent = brief(assessment?.summary || record.error || 'No audio assessment received.');
-  list('observations', assessment ? [assessment.summary, `Recording quality: ${assessment.recording_quality}`,
-    ...assessment.observations, ...(assessment.suggestions || []).map(s => `try: ${s}`)] : []);
+  list('observations', [
+    ...(heardLine ? [heardLine] : []),
+    ...(measured?.missed_indices?.length ? [`no onset detected for notes ${measured.missed_indices.map(i => i + 1).join(', ')}`] : []),
+    ...(assessment ? [assessment.summary, `Recording quality: ${assessment.recording_quality}`,
+      ...assessment.observations, ...(assessment.suggestions || []).map(s => `try: ${s}`)] : []),
+  ]);
   list('limitations', assessment?.limitations || []);
   if (record.revision) {
     $('proposal').hidden = false;

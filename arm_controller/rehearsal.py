@@ -27,6 +27,7 @@ from tap_history import (
     tuning_id,
     write_json,
 )
+from tap_audio_metrics import measure_take
 from tap_plans import (
     MAX_ATTEMPTS,
     MAX_CAPTURE_SECONDS,
@@ -35,6 +36,7 @@ from tap_plans import (
     StrictModel,
     TapPlan,
     expected_phrase,
+    pitch,
     propose_revision,
     validate_take,
 )
@@ -445,8 +447,20 @@ class RehearsalManager:
     def _review(self, attempt, path):
         record = attempt.record
         plan = TapPlan.model_validate(record["plan"])
+        # Deterministic local measurement FIRST: reproducible per-note onset/
+        # clarity/pitch numbers from the capture itself. This — not the audio
+        # model's hearing — is the planner's primary evidence. Local DSP only.
         try:
-            # No retry or fallback: one audio request, and at most one text revision request.
+            metrics = measure_take(path.read_bytes(), record["telemetry"],
+                                   int(record["capture"]["dispatch_frame"]),
+                                   [pitch(n.string, n.fret) for n in plan.notes])
+        except Exception as exc:  # noqa: BLE001 - measurement is best-effort, never blocks
+            metrics = {"error": f"local measurement failed ({type(exc).__name__})"}
+        with self.lock:
+            record["acoustic_metrics"] = metrics
+            self._save(attempt)
+        try:
+            # No retry here: one audio request, and at most one text revision request.
             report = self.evaluate(path, expected_phrase=expected_phrase(plan),
                                    attempt_id=record["attempt_id"], source="browser_microphone",
                                    allow_upload=True)
@@ -473,7 +487,8 @@ class RehearsalManager:
             history = self.archive.planner_context(record["session_id"], record["attempt_id"])
             revision = self.revise(plan, attempt.registry["keys"], assessment, copy.deepcopy(record["telemetry"]),
                                    history=history,
-                                   allowed_profiles=attempt.registry.get("path_profiles", ("rest_hub",)))
+                                   allowed_profiles=attempt.registry.get("path_profiles", ("rest_hub",)),
+                                   acoustic_metrics=copy.deepcopy(metrics))
             with self.lock:
                 if attempt.stop.is_set():
                     self._finish(attempt, "stopped", record["error"])
