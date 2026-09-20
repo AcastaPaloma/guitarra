@@ -116,7 +116,9 @@ function selection() {
   const start = Math.trunc(Math.max(0, Math.min(arrangement.length - 1, (Number($('take-start').value) || 1) - 1)));
   const count = Math.trunc(Math.max(1, Math.min(config?.max_take_notes || 4, budgetFit(),
     arrangement.length - start, Number($('take-count').value) || 1)));
-  return {start, count, notes: arrangement.slice(start, start + count).map(n => ({...n}))};
+  // beats are display-only; executable plans carry the compiled pause_ms.
+  return {start, count, notes: arrangement.slice(start, start + count)
+    .map(n => ({arm: n.arm, string: n.string, fret: n.fret, pause_ms: n.pause_ms}))};
 }
 
 function selectTake() {
@@ -167,14 +169,18 @@ async function previewTrajectory(notes) {
   }
 }
 
-function showArrangement(notes, title, profile) {
-  arrangement = notes.map(n => ({arm: n.arm || 'tap_primary', string: n.string, fret: n.fret, pause_ms: n.pause_ms ?? 250}));
+function showArrangement(notes, title, profile, rhythm) {
+  arrangement = notes.map(n => ({arm: n.arm || 'tap_primary', string: n.string, fret: n.fret,
+                                 pause_ms: n.pause_ms ?? 250, beats: n.beats}));
   pathProfile = profile || defaultProfile();
   arrangementTitle = title;
-  $('title').textContent = title;
+  $('title').textContent = title + (rhythm?.tempo_bpm
+    ? ` · ♩=${rhythm.tempo_bpm}${rhythm.rhythm_stretched ? ` (played at ~${rhythm.effective_bpm} — hardware-paced, relative rhythm kept)` : ''}`
+    : '');
   $('notes').replaceChildren(...arrangement.map((n, i) => {
     const node = textNode('div', '', 'note');
-    node.append(textNode('b', `s${n.string}·f${n.fret}`), textNode('span', `${i + 1}. ${pitch(n)} · ${n.arm}`));
+    const beats = typeof n.beats === 'number' && n.beats !== 1 ? ` · ${n.beats}♪` : '';
+    node.append(textNode('b', `s${n.string}·f${n.fret}`), textNode('span', `${i + 1}. ${pitch(n)} · ${n.arm}${beats}`));
     return node;
   }));
   $('take-start').max = arrangement.length; $('take-start').value = 1;
@@ -218,7 +224,9 @@ $('convert').onclick = async () => {
     const result = await api('/api/plan', request, {timeout: 90000});
     parentId = sourceId = sessionId = null; lastReview = null; sessionHistory = null; rememberSession();
     $('review').hidden = true; $('history-count').textContent = '0';
-    showArrangement(result.notes, result.title, result.path_profile);
+    showArrangement(result.notes, result.title, result.path_profile,
+                    {tempo_bpm: result.tempo_bpm, effective_bpm: result.effective_bpm,
+                     rhythm_stretched: result.rhythm_stretched});
     if (result.transcription) {
       const t = result.transcription;
       const shift = t.transpose ? ` · transposed ${t.transpose > 0 ? '+' : ''}${t.transpose} semitones to fit the rig` : '';
