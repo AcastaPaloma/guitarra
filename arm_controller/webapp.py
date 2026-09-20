@@ -31,6 +31,7 @@ sys.path.insert(0, str(HERE.parent / "guitar"))
 
 import calibration
 import fret
+import songsterr
 from model.audio import AUDIO_MODELS, DEFAULT_AUDIO_MODEL
 from model.baseten import DEFAULT_MODEL, BasetenError, load_env
 from rehearsal import (
@@ -142,20 +143,21 @@ def execute_take(plan, registry, stop_event, emit):
     finally:
         with _halt_lock:
             _active_halt["event"] = None
-        # Completed/stopped takes end settled at a hub (with row_hub that hub is
-        # OVER the guitar), so PARK at the recorded global rest before releasing
-        # torque — never drop the arm onto the strings. On a FAULT: no recovery
-        # motion and body torque off (a stalled servo must not keep driving into
-        # whatever blocked it) — the operator supports the body, as before. On a
-        # FORCE STOP: goals were frozen at present positions, so torque is held
-        # and the arm stays put; recover via /calibrate or the GUI. Motor 12 is
-        # never touched either way.
+        # Completed/stopped takes PARK at the recorded global rest and then HOLD
+        # torque there, so the arm never slumps or drops onto the guitar after
+        # finishing (release torque later from /calibrate, supporting the body).
+        # On a FAULT: no recovery motion and body torque off (a stalled servo
+        # must not keep driving into whatever blocked it) — the operator
+        # supports the body, as before. On a FORCE STOP: goals were frozen at
+        # present positions and torque is held there. Motor 12 never touched.
+        parked = False
         if clean and not halt.is_set():
             try:
                 arm.rest()
+                parked = True
             except Exception:  # noqa: BLE001 - failed park = uncertain state: release, no retry
                 pass
-        arm.close(torque_off=not halt.is_set())
+        arm.close(torque_off=not parked and not halt.is_set())
 
 
 manager = RehearsalManager(RUN_ROOT, registry=read_registry, execute=execute_take,
@@ -227,6 +229,10 @@ async def admission_error(_request, exc):
 class PlanReq(StrictModel):
     prompt: str = Field(min_length=1, max_length=8000)
     allow_inference: Consent
+    # Optional: arrange from an official Songsterr tab. The tab is fetched
+    # SERVER-side by songsterr.py and passed to the planner as musical data.
+    songsterr_song_id: int | None = Field(default=None, ge=1, le=10_000_000)
+    songsterr_track: int | None = Field(default=None, ge=0, le=63)
 
 
 class PrepareReq(StrictModel):
@@ -292,11 +298,35 @@ def plan(req: PlanReq):
     if not _plan_lock.acquire(blocking=False):
         raise RehearsalError("An arrangement request is already pending; no duplicate inference")
     try:
-        return arrange(req.prompt, registry["keys"])
+        tab_context = None
+        if req.songsterr_song_id is not None:
+            try:
+                tab = songsterr.fetch_track_notes(req.songsterr_song_id, req.songsterr_track)
+            except songsterr.SongsterrError as exc:
+                raise HTTPException(502, f"Songsterr: {exc}") from None
+            tab_context = songsterr.condense(tab)
+        result = arrange(req.prompt, registry["keys"], tab_context)
+        if tab_context:
+            result["tab_source"] = {"songId": req.songsterr_song_id,
+                                    "artist": tab["artist"], "song": tab["song"],
+                                    "track": tab["track_name"]}
+        return result
     except (BasetenError, ValueError):
         raise HTTPException(502, "Baseten planning unavailable or invalid response; no automatic retry") from None
     finally:
         _plan_lock.release()
+
+
+@app.get("/api/tabs/search")
+def tabs_search(pattern: str):
+    """Find official Songsterr tabs by song/artist name. Read-only lookup."""
+    pattern = pattern.strip()
+    if not 1 <= len(pattern) <= 200:
+        raise HTTPException(400, "Give a song or artist name (1-200 characters)")
+    try:
+        return {"results": songsterr.search(pattern)}
+    except songsterr.SongsterrError as exc:
+        raise HTTPException(502, f"Songsterr: {exc}") from None
 
 
 @app.post("/api/attempts")

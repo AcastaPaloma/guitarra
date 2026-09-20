@@ -76,6 +76,7 @@ function rememberSession() {
 function controls() {
   const ready = config?.keys.length && config.key_present && config.audio_model_supported;
   $('convert').disabled = running || foreignActive || !config?.keys.length || !config.key_present;
+  $('find-tab').disabled = running || foreignActive;
   $('play').disabled = running || foreignActive || !ready || !arrangement.length;
   $('confirm-play').disabled = running || !$('media-consent').checked || !$('supervised').checked;
   $('stop').disabled = !running && !foreignActive;
@@ -141,15 +142,38 @@ for (const id of ['take-start', 'take-count']) $(id).onchange = () => {
 };
 document.querySelectorAll('.examples button').forEach(b => { b.onclick = () => { $('prompt').value = b.dataset.example; }; });
 
+$('find-tab').onclick = async () => {
+  const query = $('prompt').value.trim();
+  if (!query) return say('Type the song name first, then find its tab.', true);
+  $('find-tab').disabled = true; say('Searching Songsterr…');
+  try {
+    const data = await api('/api/tabs/search?pattern=' + encodeURIComponent(query.slice(0, 200)),
+                           undefined, {timeout: 25000});
+    const select = $('tab-results');
+    select.replaceChildren(new Option('— no official tab (arrange from memory) —', ''));
+    for (const song of data.results) select.add(new Option(`${song.artist} — ${song.title}`, String(song.songId)));
+    select.hidden = false;
+    if (data.results.length) { select.selectedIndex = 1; say('Official tab selected — MAKE NOTES will arrange from it.'); }
+    else say('No Songsterr match; arrange from memory instead.', true);
+  } catch (error) { say('Tab search: ' + error.message, true); }
+  $('find-tab').disabled = false;
+};
+
 $('convert').onclick = async () => {
   const prompt = $('prompt').value.trim();
   if (!prompt) return say('Write a musical request first.', true);
   running = true; controls(); $('stop').disabled = true; step(1); say('Making a playable arrangement…');
   try {
-    const result = await api('/api/plan', {prompt, allow_inference: true}, {timeout: 70000});
+    const songId = Number($('tab-results').value) || null;
+    const request = {prompt, allow_inference: true};
+    if (songId) request.songsterr_song_id = songId;
+    const result = await api('/api/plan', request, {timeout: 90000});
     parentId = sourceId = sessionId = null; lastReview = null; sessionHistory = null; rememberSession();
     $('review').hidden = true; $('history-count').textContent = '0';
-    showArrangement(result.notes, result.title); say('Choose a short phrase, then play + listen.');
+    showArrangement(result.notes, result.title);
+    say(result.tab_source
+      ? `Arranged from the official tab: ${result.tab_source.artist} — ${result.tab_source.song}. Play + listen.`
+      : 'Choose a short phrase, then play + listen.');
   } catch (error) { say(error.message, true); }
   finally { running = false; controls(); }
 };

@@ -91,7 +91,7 @@ def _run(monkeypatch, mode):
 def test_clean_take_parks_at_rest_before_torque_off(monkeypatch):
     completed, arm = _run(monkeypatch, "ok")
     assert completed is True
-    assert arm.calls == [("tap", 1, 1), ("rest",), ("close", True)]
+    assert arm.calls == [("tap", 1, 1), ("rest",), ("close", False)]  # held at rest
 
 
 def test_fault_makes_no_recovery_motion_and_releases_torque(monkeypatch):

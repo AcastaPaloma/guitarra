@@ -32,6 +32,7 @@ textarea { width:100%; height:100px; padding:14px; margin-top:10px; resize:verti
 .btn.primary { background:var(--accent); color:var(--paper); border-color:var(--accent); }
 .btn.danger { border:2px solid var(--accent); color:var(--accent); font-weight:bold; }
 .btn.danger:not(:disabled):hover { background:var(--accent); color:var(--paper); }
+.tab-row { display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap; }
 .text-button { font-size:11px; border:0; background:none; padding:5px 0; }
 .hint { font-size:10px; line-height:1.7; opacity:.7; margin-top:8px; }
 .section-title { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
