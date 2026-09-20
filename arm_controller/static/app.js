@@ -6,6 +6,7 @@ const terminal = new Set(['review_ready', 'keep', 'inspect', 'unavailable', 'sto
 const storageKey = 'guitarra.rehearsal.session.v1';
 let config, arrangement = [], arrangementTitle = '', parentId = null, sourceId = null, sessionId = null;
 let pathProfile = 'rest_hub';
+let snaRunning = false, snaPoller = null;
 // Best staging family the local registry reports as operator-qualified. The UI
 // only ever picks from config.path_profiles; it cannot invent a path.
 const defaultProfile = () => (config?.path_profiles || []).includes('row_hub') ? 'row_hub' : 'rest_hub';
@@ -75,12 +76,13 @@ function rememberSession() {
 
 function controls() {
   const ready = config?.keys.length && config.key_present && config.audio_model_supported;
-  $('convert').disabled = running || foreignActive || !config?.keys.length || !config.key_present;
-  $('find-tab').disabled = running || foreignActive;
-  $('play').disabled = running || foreignActive || !ready || !arrangement.length;
+  $('convert').disabled = running || foreignActive || snaRunning || !config?.keys.length || !config.key_present;
+  $('find-tab').disabled = running || foreignActive || snaRunning;
+  $('play-sna').disabled = running || foreignActive || snaRunning;
+  $('play').disabled = running || foreignActive || snaRunning || !ready || !arrangement.length;
   $('confirm-play').disabled = running || !$('media-consent').checked || !$('supervised').checked;
-  $('stop').disabled = !running && !foreignActive;
-  $('force-stop').disabled = !running && !foreignActive;
+  $('stop').disabled = !running && !foreignActive && !snaRunning;
+  $('force-stop').disabled = !running && !foreignActive && !snaRunning;
   for (const id of ['prompt', 'take-start', 'take-count', 'media-consent', 'supervised', 'session-select', 'change-song']) {
     $(id).disabled = running || foreignActive;
   }
@@ -246,7 +248,30 @@ function requestStop(reason = 'Stopped by operator.') {
   })();
   return stoppingPromise;
 }
-$('stop').onclick = () => { if (foreignActive) stoppingPromise = null; void requestStop(); };
+$('stop').onclick = () => {
+  if (snaRunning) { void api('/api/sna-stop', {}).catch(() => {}); say('Stopping the riff after this tap…'); return; }
+  if (foreignActive) stoppingPromise = null;
+  void requestStop();
+};
+
+$('play-sna').onclick = async () => {
+  if (!confirm('The arm will MOVE for real and play the Seven Nation Army riff on the ' +
+               'low-E poses (2/3/5/7/10). Supervising with the body supported?')) return;
+  try {
+    const started = await api('/api/play-sna', {supervised_and_supported: true});
+    snaRunning = true; controls();
+    say(`Seven Nation Army — ${started.total} taps…`);
+    snaPoller = setInterval(async () => {
+      try {
+        const s = (await api('/api/status')).sna;
+        if (s.running) { if (s.index >= 0) say(`Seven Nation Army — tap ${s.index + 1} of ${s.total}`); return; }
+        clearInterval(snaPoller); snaPoller = null; snaRunning = false; controls();
+        say(s.error ? 'Riff error: ' + s.error : 'Seven Nation Army done — arm parked at rest (torque held).',
+            !!s.error);
+      } catch { /* keep polling */ }
+    }, 400);
+  } catch (error) { say('Riff: ' + error.message, true); }
+};
 $('force-stop').onclick = async () => {
   // No confirm dialog: this is the emergency control; a prompt would delay it.
   try {

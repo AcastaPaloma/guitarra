@@ -161,10 +161,67 @@ def execute_take(plan, registry, stop_event, emit):
         arm.close(torque_off=not parked and not halt.is_set())
 
 
+# Seven Nation Army riff button: plays the operator-recorded low-E extra poses
+# through fret.play semantics outside the rehearsal pipeline (those poses can't
+# be expressed in the grid plan schema). Same ownership rules: never during a
+# take or calibration session; STOP is cooperative; FORCE STOP freezes it.
+_sna_state_lock = threading.Lock()
+_sna = {"running": False, "index": -1, "total": len(fret.SNA_RIFF),
+        "stop": False, "error": None}
+
+
+def _sna_thread():
+    halt = threading.Event()
+    error = None
+    try:
+        arm = fret.FretArm(path_profile="rest_hub", halt=halt)
+    except Exception as exc:  # noqa: BLE001 - report, never retry motion
+        with _sna_state_lock:
+            _sna.update(running=False, index=-1, error=f"arm unavailable: {exc}")
+        return
+    with _halt_lock:
+        _active_halt["event"] = halt
+    clean = False
+    try:
+        for index, (name, gap) in enumerate(fret.SNA_RIFF):
+            with _sna_state_lock:
+                if _sna["stop"]:
+                    break
+                _sna["index"] = index
+            arm.tap_pose(name)
+            time.sleep(gap if gap is not None else 0.2)
+        clean = True
+    except Exception as exc:  # noqa: BLE001 - fault ends the riff, state recorded
+        error = str(exc)
+    finally:
+        with _halt_lock:
+            _active_halt["event"] = None
+        # Same end-of-motion contract as takes: clean -> park at rest and HOLD;
+        # fault -> release with no recovery motion; force stop -> hold frozen.
+        parked = False
+        if clean and not halt.is_set():
+            try:
+                arm.rest()
+                parked = True
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            arm.close(torque_off=not parked and not halt.is_set())
+        except Exception:  # noqa: BLE001
+            pass
+        with _sna_state_lock:
+            _sna.update(running=False, index=-1, error=error)
+
+
+def sna_running():
+    with _sna_state_lock:
+        return _sna["running"]
+
+
 manager = RehearsalManager(RUN_ROOT, registry=read_registry, execute=execute_take,
                            lock=calibration.ownership_lock,
                            calibration_active=calibration.session_active)
-calibration.set_play_guard(lambda: manager.busy)
+calibration.set_play_guard(lambda: manager.busy or sna_running())
 
 app = FastAPI(docs_url=None, redoc_url=None)
 app.include_router(calibration.router)
@@ -344,6 +401,8 @@ def tabs_search(pattern: str):
 
 @app.post("/api/attempts")
 def prepare(req: PrepareReq):
+    if sna_running():
+        raise RehearsalError("The riff is playing — wait for it to finish")
     if not (os.environ.get("BASETEN_API_KEY") or os.environ.get("BASETEN")):
         raise RehearsalError("Configure the server-side Baseten credential before a recorded take")
     if (os.environ.get("BASETEN_AUDIO_MODEL") or DEFAULT_AUDIO_MODEL) not in AUDIO_MODELS:
@@ -354,8 +413,45 @@ def prepare(req: PrepareReq):
 
 @app.post("/api/play")
 def play(req: PlayReq):
+    if sna_running():
+        raise RehearsalError("The riff is playing — wait for it to finish")
     capture = CaptureStart.model_validate(req.model_dump(exclude={"attempt_id"}))
     return manager.start(req.attempt_id, capture)
+
+
+class SnaReq(StrictModel):
+    supervised_and_supported: Consent
+
+
+@app.post("/api/play-sna")
+def play_sna(req: SnaReq):
+    """Play the Seven Nation Army riff on the recorded low-E extra poses."""
+    if manager.busy:
+        raise RehearsalError("Finish the current take before playing the riff")
+    if calibration.session_active():
+        raise RehearsalError("Calibration holds the serial port — disconnect it first")
+    missing = sorted({name for name, _ in fret.SNA_RIFF} - set(fret.load_map()["extras"]))
+    if missing:
+        raise RehearsalError(f"Record the low-E extra poses first: {missing}")
+    with _sna_state_lock:
+        if _sna["running"]:
+            raise RehearsalError("The riff is already playing")
+        _sna.update(running=True, index=-1, total=len(fret.SNA_RIFF),
+                    stop=False, error=None)
+    threading.Thread(target=_sna_thread, daemon=True).start()
+    return {"started": True, "total": len(fret.SNA_RIFF)}
+
+
+class SnaStopReq(StrictModel):
+    pass  # explicit empty JSON body
+
+
+@app.post("/api/sna-stop")
+def sna_stop(_req: SnaStopReq):
+    """Cooperative riff stop: the current bounded tap finishes, then it parks."""
+    with _sna_state_lock:
+        _sna["stop"] = True
+    return {"stopping": True}
 
 
 @app.post("/api/stop")
@@ -391,7 +487,9 @@ def force_stop(_req: ForceStopReq):
 
 @app.get("/api/status")
 def status():
-    return {"active_attempt": manager.active()}
+    with _sna_state_lock:
+        sna = dict(_sna)
+    return {"active_attempt": manager.active(), "sna": sna}
 
 
 @app.get("/api/attempts/{attempt_id}")
