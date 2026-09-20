@@ -122,23 +122,41 @@ There is deliberately no automatic motion script that certifies these paths.
 The existing calibration page can capture poses; its manual **Go** button is not
 this path compiler and must not be used to drag between contact positions.
 
-## Returning second arm: planned, not enabled
+## Returning second arm: gated on its own recorded hovers and review
 
 `tap_arms.py` defines two **tap** owners, not the historical fret/pick split:
 
 | Owner | Key responsibility | Current state |
 |---|---|---|
 | `tap_primary` | Current recorded keys in rows 1–5; strings 1–6 | Existing body IDs 7–11; lift-first data still missing |
-| `tap_secondary` | Planned rows **7–11**, strings **1–6 right-to-left** | No active key/hover registry or commissioned connection |
+| `tap_secondary` | Rows **7–11**, strings **1–6 right-to-left** | `arm1.py` driver (body IDs 5,4,6,1,2; grip 3 NEVER commanded); 29 contacts recorded, **zero hovers**, no path review → unavailable |
 
-String 1 is high E/rightmost; 6 is low E/leftmost. Row 6 is not assigned.
-Notes carry an `arm` field. Assignment validation rejects another arm's rows,
-unrecorded keys, disabled arms, unknown owners, and silent reassignment. An older
-single-arm note normalizes to `tap_primary`, never the returning arm.
+String 1 is high E/rightmost; 6 is low E/leftmost. Row 6 is not assigned to any
+arm and is rejected. Notes carry an `arm` field; when a planner omits it, local
+code derives the owner from the fret row (`tap_arms.ROW_OWNERS`) and re-validates.
+Assignment validation rejects another arm's rows, unrecorded keys, disabled arms,
+unknown owners, and silent reassignment. An older single-arm note normalizes to
+`tap_primary`, never the returning arm.
 
-The device-free assignment contract preserves note order and serializes both owners
-on the shared guitar workspace. **No overlapping two-arm motion is authorized.**
-An offline dual-owner fixture is not a live two-arm scheduler. Enabling the second
-arm later still needs its own actual motor/port mapping, recorded contact/hover
-poses, path review, stop/health handling, and executor. No old pluck-arm IDs or poses
-are borrowed and no second device is connected by this change.
+The SAME lift-first contract applies to both arms via the generalized
+`tap_paths.ClearancePaths`, parameterized by each arm's ordered body IDs. The
+**motion contract hash includes the arm's body IDs**, so an operator review is
+bound to exactly one arm: the primary review lives in `calibration_arm2.json`,
+the secondary's in `calibration_arm1.json` (same schema, `arm1.py
+--path-template` prints the draft for its IDs). The secondary becomes
+`available_for_planning`/executable ONLY when `keyframes_arm1.json` has both
+contacts and per-key `hover-r{fret}-c{string}` poses (shorthand
+`hover-r{R}_{C}` / `hover_r{R}_{C}` accepted) AND its reviewed paths compile;
+otherwise `unavailable_reason` states exactly what is missing ("no hover poses
+recorded" / "paths not compiled: …"). The webapp capability fingerprint covers
+the arm-1 bytes, so any arm-1 map/review change invalidates reservations.
+
+Execution of a mixed take is **strictly sequential**: one arm moves at a time;
+the idle arm holds its own hover/rest. Each arm's key subsequence is compiled
+against its own reviewed registry. Per-arm end-of-take contract: clean → each
+arm parks once via its reviewed exit (one at a time) and holds torque; any
+fault → no further motion on ANY arm, body torque released (support the body);
+force stop → one shared halt event freezes BOTH arms with torque held.
+**No overlapping two-arm motion is authorized.** `arm1.py`'s legacy rest-staged
+tap is deprecated for the webapp; only its CLI `--unsafe-rest-staging` flag
+(with a printed warning) can still reach it for supervised bring-up.

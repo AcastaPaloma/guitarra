@@ -160,6 +160,11 @@ class FretArm:
     halt = None
     path_profile = PROFILE
     motion_fault = None
+    # Ordered body joints; overwritten per-instance from the reviewed path
+    # registry's body_ids so the SAME lift-first executor drives either tap
+    # arm. Order: base yaw, shoulder, elbow, wrist flex, wrist roll. The
+    # class default keeps the primary arm's historical behavior.
+    motor_ids = MOTOR_IDS
 
     def __init__(self, port=FRET_PORT, baud=BAUD, *, grid=None, row_rests=None,
                  path_profile=None, paths=None, halt=None):
@@ -181,6 +186,7 @@ class FretArm:
                                                  json.loads(kinematics.CAL_PATH.read_text()))
         if not isinstance(paths, ClearancePaths):
             raise PathUnavailable("A current operator-reviewed lift-first registry is required before connection")
+        self.motor_ids = list(paths.body_ids)  # the reviewed arm's joints, nothing else
         self.cells, self.rest_pose, self.warnings = grid
         if (paths.pose("rest") != self.rest_pose
                 or any(paths.pose(contact_name(k)) != self.cells.get(k) for k in paths.keys)):
@@ -192,17 +198,17 @@ class FretArm:
         self.bus = FeetechBus(port, baud)
         wrote_goals = False
         try:
-            alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
-            if len(alive) < len(MOTOR_IDS):
-                raise RuntimeError(f"fret arm motors responding: {alive} of {MOTOR_IDS} — check power")
+            alive = [sid for sid in self.motor_ids if self.bus.ping(sid)]
+            if len(alive) < len(self.motor_ids):
+                raise RuntimeError(f"fret arm motors responding: {alive} of {self.motor_ids} — check power")
             check_supply_voltage(self.bus, alive)  # refuse motion on a bad brick
             present = self._require_at("rest")  # no goal/torque write on unknown starting state
             self._check_halt()
             # Hold fresh positions, never re-enable torque against stale servo goals.
             wrote_goals = True
-            for sid in MOTOR_IDS:
+            for sid in self.motor_ids:
                 self.bus.goto(sid, present[sid], speed=TRAVEL_SPEED, acc=ACC)
-            for sid in MOTOR_IDS:
+            for sid in self.motor_ids:
                 self.bus.set_torque(sid, True)
         except Exception:
             self.close(torque_off=wrote_goals)  # body only; no movement or grip reassertion
@@ -214,7 +220,7 @@ class FretArm:
         error = None
         try:
             if torque_off:
-                for sid in MOTOR_IDS:
+                for sid in self.motor_ids:
                     try:
                         self.bus.set_torque(sid, False)
                     except Exception as exc:
@@ -227,7 +233,7 @@ class FretArm:
     def _freeze(self):
         """Overwrite every goal with the present position: the servo holds where
         it is right now. Best-effort per motor; torque is deliberately left ON."""
-        for sid in MOTOR_IDS:
+        for sid in self.motor_ids:
             try:
                 pos = self.bus.read_pos(sid)
                 if pos is not None:
@@ -241,7 +247,7 @@ class FretArm:
             raise Halted("force stop: arm frozen mid-path, torque held")
 
     def _move(self, pose, speed, wait=True, *, deadline=None, tol=SETTLE_TOL, settle_s=0):
-        if set(pose) != set(MOTOR_IDS) or any(type(v) is not int or not 0 <= v <= 4095
+        if set(pose) != set(self.motor_ids) or any(type(v) is not int or not 0 <= v <= 4095
                                             for v in pose.values()):
             raise ValueError("A complete recorded body-joint pose is required")
         if self.motion_fault:
@@ -260,7 +266,7 @@ class FretArm:
                 while time.monotonic() < stage_deadline:
                     self._check_halt()
                     now = time.monotonic()
-                    positions = {sid: self.bus.read_pos(sid) for sid in MOTOR_IDS}
+                    positions = {sid: self.bus.read_pos(sid) for sid in self.motor_ids}
                     at_target = all(type(positions[sid]) is int and abs(positions[sid] - t) <= tol
                                     for sid, t in pose.items())
                     settled_since = (now if settled_since is None else settled_since) if at_target else None
@@ -278,7 +284,7 @@ class FretArm:
             raise PathUnavailable("Motion fault is latched; no automatic recovery")
         pose = self.paths.pose(name)
         try:
-            positions = {sid: self.bus.read_pos(sid) for sid in MOTOR_IDS}
+            positions = {sid: self.bus.read_pos(sid) for sid in self.motor_ids}
         except Exception:
             self.motion_fault = "position_read_failed"
             raise
@@ -314,21 +320,24 @@ class FretArm:
             # straight from a pressed contact pries the fingertip against the
             # string it is pressing and can stall (observed: s5f2 timeout), so
             # the lift is two-phase: (1) RELEASE the press — elbow/wrist-flex
-            # (9, 10) to their hover values, a short vertical un-press — then
-            # (2) the shoulder rises with the rest of the pose. Yaw/roll (7, 11)
-            # never move during either phase, so there is still no sideways
-            # sweep near the strings. Interim goals hold non-lifting joints at
-            # their present readings; endpoints remain the reviewed poses only.
+            # (positions 3 and 4 of the arm's ordered body joints; 9, 10 on the
+            # primary arm) to their hover values, a short vertical un-press —
+            # then (2) the shoulder rises with the rest of the pose. Yaw/roll
+            # (the first/last body joints) never move during either phase, so
+            # there is still no sideways sweep near the strings. Interim goals
+            # hold non-lifting joints at their present readings; endpoints
+            # remain the reviewed poses only.
+            release_ids = (self.motor_ids[2], self.motor_ids[3])  # elbow, wrist flex
             held = {}
-            for sid in MOTOR_IDS:
+            for sid in self.motor_ids:
                 for _ in range(5):
                     p = self.bus.read_pos(sid)
                     if p is not None:
                         held[sid] = p
                         break
-            if set(held) == set(MOTOR_IDS):
+            if set(held) == set(self.motor_ids):
                 staged_lift = True
-                self._move({**held, 9: target[9], 10: target[10]}, speed,
+                self._move({**held, **{sid: target[sid] for sid in release_ids}}, speed,
                            deadline=deadline, tol=PRESS_TOL,
                            settle_s=CLEARANCE_DWELL_S)
         self._move(target, speed, deadline=deadline,

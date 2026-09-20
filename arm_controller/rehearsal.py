@@ -28,6 +28,7 @@ from tap_history import (
     tuning_id,
     write_json,
 )
+from tap_arms import enabled_key_map
 from tap_audio_metrics import measure_take
 from tap_plans import (
     MAX_ATTEMPTS,
@@ -198,7 +199,8 @@ class RehearsalManager:
             try:
                 trajectory = self.admit(plan, registry) if self.admit else None
                 validate_take(plan, registry["keys"],
-                              registry.get("path_profiles", ("rest_hub",)))
+                              registry.get("path_profiles", ("rest_hub",)),
+                              enabled_arm_keys=enabled_key_map(registry))
             except ValueError as exc:
                 # Admission refusal, not a server fault: surface as a clean 409
                 # message instead of an opaque 500 page.
@@ -503,7 +505,8 @@ class RehearsalManager:
                 revision = self.revise(plan, attempt.registry["keys"], assessment,
                                        copy.deepcopy(record["telemetry"]), history=history,
                                        allowed_profiles=attempt.registry.get("path_profiles", ("rest_hub",)),
-                                       acoustic_metrics=copy.deepcopy(metrics))
+                                       acoustic_metrics=copy.deepcopy(metrics),
+                                       enabled_arm_keys=enabled_key_map(attempt.registry))
             except (BasetenError, ValueError):
                 # Preserve the incoming reply-resilience fix for both provider/
                 # schema errors and local revision rejection. Stop/freshness

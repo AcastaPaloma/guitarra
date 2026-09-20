@@ -29,10 +29,12 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "guitar"))
 
+import arm1
 import calibration
 import fret
 import songsterr
-from tap_arms import PRIMARY, assign, capabilities as arm_capabilities
+from tap_arms import (PRIMARY, SECONDARY, assign, capabilities as arm_capabilities,
+                      enabled_key_map, owner_of_row)
 from tap_paths import PROFILE, ClearancePaths, PathUnavailable, motion_contract
 from model.audio import AUDIO_MODELS, DEFAULT_AUDIO_MODEL
 from model.baseten import DEFAULT_MODEL, BasetenError, load_env
@@ -64,6 +66,63 @@ RUN_ROOT = HERE.parent / "guitar" / "runs" / "tap_rehearsal"
 _plan_lock = threading.Lock()
 
 
+def _read_secondary_registry():
+    """Arm-1 (upper rows 7-11) snapshot. Missing/invalid data makes the secondary
+    UNAVAILABLE with an exact reason; it never blocks the primary registry.
+
+    -> (secondary dict, keyframes bytes, calibration bytes) — the bytes feed the
+    capability fingerprint so any arm-1 change invalidates reservations too.
+    """
+    secondary = {"keys": set(), "grid": None, "hovers": {}, "paths": None,
+                 "warnings": [], "available": False, "path_blocker": None}
+    try:
+        raw = (HERE / "keyframes_arm1.json").read_bytes()
+    except OSError:
+        secondary["path_blocker"] = ("no secondary keyframes: keyframes_arm1.json is missing "
+                                     "(record arm-1 contact keys first)")
+        return secondary, b"", b""
+    try:
+        calibration_bytes = (HERE / "calibration_arm1.json").read_bytes()
+    except OSError:
+        calibration_bytes = b""
+    try:
+        entries = json.loads(raw)
+        # Same strictness as the primary map: reject coercion/incomplete poses
+        # BEFORE the loader converts counts. Recorded grip 3 may be present in
+        # the file but is filtered out of every motion pose.
+        if not isinstance(entries, list):
+            raise TypeError("Arm-1 keypoints must be a list")
+        for entry in entries:
+            positions = entry["positions"]
+            if (not {str(s) for s in arm1.BODY_IDS} <= set(positions)
+                    or any(type(v) is not int or not 0 <= v <= 4095 for v in positions.values())):
+                raise ValueError("Arm-1 keypoints must contain complete raw integer poses")
+        snapshot = arm1.load_map(entries=entries)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        secondary["path_blocker"] = f"invalid keyframes_arm1.json; secondary disabled ({exc})"
+        return secondary, raw, calibration_bytes
+    secondary.update(keys=set(snapshot["cells"]),
+                     grid=(snapshot["cells"], snapshot["rest"], snapshot["warns"]),
+                     hovers=snapshot["hovers"], warnings=snapshot["warns"])
+    if not snapshot["cells"]:
+        secondary["path_blocker"] = "no contact keys recorded in keyframes_arm1.json"
+    elif not snapshot["hovers"]:
+        secondary["path_blocker"] = ("no hover poses recorded: record a hover-r{fret}-c{string} "
+                                     "lift pose beside each arm-1 contact, then review its paths")
+    elif not calibration_bytes:
+        secondary["path_blocker"] = ("paths not compiled: calibration_arm1.json is missing; record "
+                                     "the operator lift-first path review there (arm1.py --path-template)")
+    else:
+        try:
+            secondary["paths"] = ClearancePaths.from_snapshot(
+                snapshot, hashlib.sha256(raw).hexdigest(), json.loads(calibration_bytes),
+                body_ids=tuple(arm1.BODY_IDS), fret_rows=arm1.FRET_ROWS)
+        except (PathUnavailable, ValueError, TypeError) as exc:
+            secondary["path_blocker"] = f"paths not compiled: {exc}"
+    secondary["available"] = bool(secondary["keys"]) and secondary["paths"] is not None
+    return secondary, raw, calibration_bytes
+
+
 def read_registry():
     """Read a current local snapshot; no old-map fallback, guessed poses, or device I/O."""
     try:
@@ -92,27 +151,75 @@ def read_registry():
                                                  json.loads(calibration_bytes))
         except PathUnavailable as exc:
             blocker = str(exc)
-        owners = json.dumps(arm_capabilities(set(cells), primary_ready=paths is not None), sort_keys=True).encode()
-        fingerprint = hashlib.sha256(raw + b"\0" + calibration_bytes + motion_contract().encode() + owners).hexdigest()
+        secondary, secondary_raw, secondary_calibration = _read_secondary_registry()
+        capabilities = arm_capabilities(set(cells), primary_ready=paths is not None,
+                                        secondary_keys=secondary["keys"],
+                                        secondary_ready=secondary["paths"] is not None,
+                                        secondary_blocker=secondary["path_blocker"])
+        owners = json.dumps(capabilities, sort_keys=True).encode()
+        fingerprint = hashlib.sha256(
+            raw + b"\0" + calibration_bytes + motion_contract().encode()
+            + b"\0" + secondary_raw + b"\0" + secondary_calibration
+            + motion_contract(tuple(arm1.BODY_IDS)).encode() + owners).hexdigest()
         return {"keys": set(cells), "grid": grid, "row_rests": snapshot["row_rests"],
                 "hovers": snapshot["hovers"], "paths": paths, "path_blocker": blocker,
                 "path_profiles": (PROFILE,) if paths else (), "fingerprint": fingerprint,
-                "warnings": warnings}
+                "warnings": warnings, "secondary": secondary, "capabilities": capabilities}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         raise RehearsalError("No valid current keypoint grid/rest pose. Calibrate first; "
                              "the backup/old fret map is not used automatically.") from None
 
 
+def _arm_paths(registry, arm_id):
+    """The reviewed ClearancePaths for one arm, or its exact blocker."""
+    if arm_id == PRIMARY:
+        paths, blocker = registry.get("paths"), registry.get("path_blocker")
+    else:
+        secondary = registry.get("secondary") or {}
+        paths, blocker = secondary.get("paths"), secondary.get("path_blocker")
+    if paths is None:
+        raise PathUnavailable(blocker or f"No reviewed lift-first paths for {arm_id}")
+    return paths
+
+
 def admit_motion(plan, registry):
-    """Whole-phrase path/arm admission BEFORE reserving a take or opening a port."""
+    """Whole-phrase path/arm admission BEFORE reserving a take or opening a port.
+
+    Each arm's key subsequence is compiled against ITS OWN reviewed registry
+    (execution is strictly sequential; the idle arm holds its own hover/rest,
+    so an arm's motion is exactly its subsequence of notes)."""
     try:
-        assignments = assign(plan.notes, {PRIMARY: registry["keys"]})
+        assignments = assign(plan.notes, enabled_key_map(registry))
         if plan.path_profile != PROFILE:
             raise PathUnavailable("Hub-only playback is retired: rebuild with lift_first; "
                                   "rest/row hubs do not guarantee lift before sideways motion")
-        if registry.get("paths") is None:
-            raise PathUnavailable(registry.get("path_blocker") or "No reviewed lift-first paths")
-        compiled = registry["paths"].compile((n.string, n.fret) for n in plan.notes)
+        arm_order = []
+        for assignment in assignments:
+            if assignment["arm"] not in arm_order:
+                arm_order.append(assignment["arm"])
+        per_arm = {}
+        for arm_id in arm_order or [PRIMARY]:
+            paths = _arm_paths(registry, arm_id)
+            keys = [(n.string, n.fret) for n, a in zip(plan.notes, assignments)
+                    if a["arm"] == arm_id]
+            per_arm[arm_id] = paths.compile(keys)
+        if arm_order == [PRIMARY]:
+            compiled = per_arm[PRIMARY]  # unchanged single-arm trajectory shape
+        else:
+            cursors = {arm_id: iter(trace["notes"]) for arm_id, trace in per_arm.items()}
+            notes = [{**next(cursors[a["arm"]]), "index": index, "arm": a["arm"]}
+                     for index, a in enumerate(assignments)]
+            compiled = {
+                "path_profile": PROFILE, "notes": notes,
+                "exit_routes": {arm_id: trace["exit_route"] for arm_id, trace in per_arm.items()},
+                "neutral_visits_between_notes": 0,
+                "joint_travel_proxy_counts": sum(t["joint_travel_proxy_counts"]
+                                                 for t in per_arm.values()),
+                "objective": per_arm[arm_order[0]]["objective"],
+                "coordination": "strictly sequential; one arm moves at a time, the idle "
+                                "arm holds its own hover/rest",
+                "physical_clearance_verified_by_software": False,
+                "cost_is_not_time_or_acoustic_quality": True}
         compiled["assignments"] = assignments
         return compiled
     except ValueError as exc:
@@ -126,7 +233,13 @@ _active_halt = {"event": None}
 
 
 def execute_take(plan, registry, stop_event, emit):
-    """Local execution only. No cloud call, arbitrary path, or model timing in the servo loop."""
+    """Local execution only. No cloud call, arbitrary path, or model timing in the servo loop.
+
+    Two-arm takes are STRICTLY SEQUENTIAL: one arm moves at a time while the
+    idle arm holds its own hover/rest. Each note's arm comes from the plan's
+    validated assignments (tap_plans/tap_arms.assign), never guessed. A single
+    shared halt event freezes BOTH arms on force stop.
+    """
     if stop_event.is_set():
         return False
     if read_registry()["fingerprint"] != registry["fingerprint"]:
@@ -137,10 +250,8 @@ def execute_take(plan, registry, stop_event, emit):
     emit({"event": "trajectory_admitted", "trajectory": compiled})
     deadline = time.monotonic() + MAX_PLAY_SECONDS
     halt = threading.Event()
-    arm = fret.FretArm(grid=registry["grid"], paths=registry["paths"],
-                       path_profile=plan.path_profile, halt=halt)
-    with _halt_lock:
-        _active_halt["event"] = halt
+    note_arms = [assignment["arm"] for assignment in compiled["assignments"]]
+    arms = {}
 
     def run_notes():
         # Each successful tap finishes at that key's OWN hover. A fault can
@@ -148,36 +259,54 @@ def execute_take(plan, registry, stop_event, emit):
         for index, note in enumerate(plan.notes):
             if stop_event.is_set():
                 return False
-            emit({"event": "note_start", "index": index, "arm": note.arm,
+            emit({"event": "note_start", "index": index, "arm": note_arms[index],
                   "string": note.string, "fret": note.fret, "shared_workspace": "guitar"})
-            result = arm.tap_key(note.string, note.fret, deadline=deadline)
-            emit({"event": "note_end", "index": index, "arm": note.arm, "result": result})
+            result = arms[note_arms[index]].tap_key(note.string, note.fret, deadline=deadline)
+            emit({"event": "note_end", "index": index, "arm": note_arms[index], "result": result})
             if index < len(plan.notes) - 1 and stop_event.wait(note.pause_ms / 1000):
                 return False
         return not stop_event.is_set()
 
     clean = False
+    with _halt_lock:
+        _active_halt["event"] = halt
     try:
+        # Open ONLY the arms this plan's assignments name; both share one halt.
+        # Opening writes hold-in-place goals at each arm's verified rest — no travel.
+        if PRIMARY in note_arms:
+            arms[PRIMARY] = fret.FretArm(grid=registry["grid"], paths=registry["paths"],
+                                         path_profile=plan.path_profile, halt=halt)
+        if SECONDARY in note_arms:
+            secondary = registry["secondary"]
+            arms[SECONDARY] = arm1.Arm1LiftFirst(grid=secondary["grid"], paths=secondary["paths"],
+                                                 path_profile=plan.path_profile, halt=halt)
         completed = run_notes()
         clean = True
         return completed
     finally:
-        # Preserve the pulled player's park/hold vs fault/body-torque-off policy.
-        # It is not thermal qualification. Keep Force Stop wired THROUGH the
-        # final exit; previously it was unregistered before this last movement.
+        # Preserve the pulled player's park/hold vs fault/body-torque-off policy,
+        # applied PER ARM: clean -> each arm parks once via its reviewed exit
+        # (one arm at a time) and holds torque; any fault -> no further motion
+        # on ANY arm, body torque released (support the body); force stop ->
+        # frozen goals held on both. Not thermal qualification. Force Stop stays
+        # wired THROUGH the final exits.
         try:
-            parked, park_error = False, None
-            if clean and not halt.is_set():
+            park_error = None
+            for arm in arms.values():
+                parked = False
+                if clean and not halt.is_set() and park_error is None:
+                    try:
+                        arm.rest(deadline=deadline)  # reviewed exit only, once, not between notes
+                        parked = True
+                    except Exception as exc:  # noqa: BLE001 - failed exit is a fault, NOT a completed take
+                        park_error = exc
                 try:
-                    arm.rest(deadline=deadline)  # reviewed exit only, once, not between notes
-                    parked = True
-                except Exception as exc:  # noqa: BLE001 - failed exit is a fault, NOT a completed take
-                    park_error = exc
-            try:
-                arm.close(torque_off=not parked and not halt.is_set())
-            finally:
-                if park_error is not None:
-                    raise park_error
+                    arm.close(torque_off=not parked and not halt.is_set())
+                except Exception as exc:  # noqa: BLE001 - keep releasing the remaining arm
+                    if park_error is None:
+                        park_error = exc
+            if park_error is not None:
+                raise park_error
         finally:
             with _halt_lock:
                 if _active_halt["event"] is halt:
@@ -345,14 +474,24 @@ def calibrate_page():
     return HTMLResponse(calibration.PAGE)
 
 
+def _planning_key_union(registry):
+    """Primary keys plus the secondary's ONLY when it is fully available."""
+    keys = set(registry["keys"])
+    secondary = registry.get("secondary") or {}
+    if secondary.get("available"):
+        keys |= set(secondary["keys"])
+    return keys
+
+
 @app.get("/api/bootstrap")
 def bootstrap():
     try:
         registry = read_registry()
-        keys, warning = key_context(registry["keys"]), None
+        keys, warning = key_context(_planning_key_union(registry)), None
     except RehearsalError as exc:
         registry, keys, warning = None, [], str(exc)
     profiles = list(registry.get("path_profiles", ())) if registry else []
+    secondary = (registry.get("secondary") or {}) if registry else {}
     audio_model = os.environ.get("BASETEN_AUDIO_MODEL") or DEFAULT_AUDIO_MODEL
     return {"session_token": SESSION_TOKEN, "keys": keys, "warning": warning,
             "keypoint_warnings": registry["warnings"] if registry else [],
@@ -364,9 +503,19 @@ def bootstrap():
             "preferred_path_profile": PROFILE, "paths_ready": PROFILE in profiles,
             "path_blocker": registry.get("path_blocker") if registry else warning,
             "recorded_hover_count": len(registry.get("hovers", {})) if registry else 0,
-            "arm_capabilities": arm_capabilities(registry["keys"] if registry else set(),
-                                                primary_ready=PROFILE in profiles),
-            "coordination": "sequential shared-workspace ownership; secondary arm unavailable",
+            "arm_capabilities": (registry.get("capabilities") if registry else None)
+                                or arm_capabilities(registry["keys"] if registry else set(),
+                                                    primary_ready=PROFILE in profiles,
+                                                    secondary_keys=secondary.get("keys") or set(),
+                                                    secondary_ready=secondary.get("paths") is not None,
+                                                    secondary_blocker=secondary.get("path_blocker")),
+            "secondary_available": bool(secondary.get("available")),
+            "secondary_path_blocker": secondary.get("path_blocker"),
+            "secondary_key_count": len(secondary.get("keys") or ()),
+            "secondary_hover_count": len(secondary.get("hovers") or ()),
+            "coordination": ("sequential shared-workspace ownership; one arm moves at a time"
+                            if secondary.get("available") else
+                            "sequential shared-workspace ownership; secondary arm unavailable"),
             "extra_pose_playback_enabled": False,
             "key_present": bool(os.environ.get("BASETEN_API_KEY") or os.environ.get("BASETEN")),
             "planner_model": os.environ.get("BASETEN_MODEL") or DEFAULT_MODEL,
@@ -388,7 +537,12 @@ def plan(req: PlanReq):
     if not _plan_lock.acquire(blocking=False):
         raise RehearsalError("An arrangement request is already pending; no duplicate inference")
     try:
-        planner_keys = registry["paths"].keys if registry.get("paths") else registry["keys"]
+        planner_keys = set(registry["paths"].keys if registry.get("paths") else registry["keys"])
+        secondary = registry.get("secondary") or {}
+        # Only a fully available secondary (recorded keys AND compiled reviewed
+        # paths) contributes its qualified keys; notes derive their arm from the
+        # fret row (tap_arms.ROW_OWNERS) and are re-validated by assign().
+        secondary_keys = set(secondary["paths"].keys) if secondary.get("available") else set()
         if req.songsterr_song_id is not None:
             # Official-tab mode is DETERMINISTIC: the tab's notes are mapped
             # pitch-exactly onto the recorded keys by local code (one global
@@ -398,13 +552,14 @@ def plan(req: PlanReq):
                 tab = songsterr.fetch_track_notes(req.songsterr_song_id, req.songsterr_track)
             except songsterr.SongsterrError as exc:
                 raise HTTPException(502, f"Songsterr: {exc}") from None
-            result = songsterr.transcribe(tab, planner_keys, max_notes=MAX_NOTES)
+            result = songsterr.transcribe(tab, planner_keys | secondary_keys, max_notes=MAX_NOTES)
             if not result["notes"]:
                 raise HTTPException(502, "This tab's notes do not map onto the recorded "
                                          "keys (out of range even after transposing)")
             return {"title": f"{tab['artist']} — {tab['song']} (official tab)",
                     "model": "deterministic-tab-transcription",
-                    "notes": [{"arm": PRIMARY, "string": s, "fret": f} for s, f in result["notes"]],
+                    "notes": [{"arm": owner_of_row(f), "string": s, "fret": f}
+                              for s, f in result["notes"]],
                     "path_profile": PROFILE,
                     "tab_source": {"songId": req.songsterr_song_id,
                                    "artist": tab["artist"], "song": tab["song"],
@@ -413,7 +568,10 @@ def plan(req: PlanReq):
                                       ("transpose", "exact", "approximated",
                                        "dropped", "total")}}
         return arrange(req.prompt, planner_keys,
-                       motion_context=registry["paths"].model_context() if registry.get("paths") else None)
+                       motion_context=registry["paths"].model_context() if registry.get("paths") else None,
+                       secondary_keys=secondary_keys,
+                       secondary_motion_context=(secondary["paths"].model_context()
+                                                 if secondary.get("available") else None))
     except (BasetenError, ValueError):
         raise HTTPException(502, "Baseten planning unavailable or invalid response; no automatic retry") from None
     finally:

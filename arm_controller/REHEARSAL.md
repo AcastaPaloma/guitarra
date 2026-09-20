@@ -4,8 +4,14 @@
 The real player no longer admits contact-only rest/row-hub paths. Its 25 current
 contacts have no recorded key hovers or lift-first review, so Play is blocked—not
 silently routed through neutral. Kimi receives arm ownership/reviewed travel costs;
-local code enforces lift → hover travel → tap independently of audio. The planned
-second tap arm owns rows 7–11, strings 1–6 right-to-left, and remains unavailable.
+local code enforces lift → hover travel → tap independently of audio. The second
+tap arm (`arm1.py`, rows 7–11, strings 1–6 right-to-left) uses the SAME generalized
+lift-first contract bound to its own body IDs; it unlocks only when
+`keyframes_arm1.json` gains per-key hovers AND `calibration_arm1.json` holds a
+current operator path review (today: 29 contacts, zero hovers → unavailable, with
+the exact missing step reported). Mixed takes are strictly sequential — one arm
+moves at a time, the idle arm parked at its own hover/rest — and force stop
+freezes BOTH arms.
 
 This is the **current single-arm web implementation**, separate from the older
 `guitar/web` fake/two-arm orchestration console. It uses the working tap/fret arm

@@ -36,7 +36,7 @@ def evaluate(*args, **kwargs):
 
 
 def revise(take, keys, assessment, telemetry, *, history=None, allowed_profiles=("rest_hub",),
-           acoustic_metrics=None):
+           acoustic_metrics=None, enabled_arm_keys=None):
     notes = [{**n.model_dump(), "source_index": i} for i, n in enumerate(take.notes)]
     notes[0]["pause_ms"] += 50
     proposal = Proposal(decision="revise", rationale="Offline fixture proposal.", notes=notes,

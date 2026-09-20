@@ -1,8 +1,15 @@
-"""Device-free lift-first route compiler for the current raw-count tap arm.
+"""Device-free lift-first route compiler for the raw-count tap arms.
 
 Contact poses are NOT a clearance map. Only operator-reviewed contact/hover
 pairs and directed hover edges are executable. No IK, generated waypoints,
 model coordinates, global-rest fallback, or hardware access lives here.
+
+The compiler is parameterized by an arm's ordered body-joint IDs so the
+SAME contract serves the primary tap arm (IDs 7-11, fret rows 1-5) and the
+secondary upper-neck arm (IDs 5,4,6,1,2, fret rows 7-11). The arm's IDs are
+part of the motion contract hash, so an operator path review is bound to ONE
+specific arm and can never authorize the other. Defaults preserve the
+primary arm's historical contract hash byte-for-byte.
 """
 from __future__ import annotations
 
@@ -11,7 +18,8 @@ import heapq
 import json
 from dataclasses import dataclass
 
-BODY_IDS = (7, 8, 9, 10, 11)  # tool clamp 12 is never part of a path
+BODY_IDS = (7, 8, 9, 10, 11)  # primary tap arm; tool clamp 12 is never part of a path
+PRIMARY_FRET_ROWS = frozenset(range(1, 6))  # fret 6 has no owner on either arm
 TRAVEL_SPEED = 400
 PRESS_SPEED = 250
 TAP_SPEED = 1200
@@ -25,10 +33,12 @@ PROFILE = "lift_first"
 SCHEMA = "guitarra.lift-first.v1"
 
 
-def motion_contract() -> str:
-    """Changing staging or its settings invalidates previously reviewed paths."""
+def motion_contract(body_ids: tuple[int, ...] = BODY_IDS) -> str:
+    """Changing staging, its settings, or the ARM'S BODY IDS invalidates
+    previously reviewed paths. The default hash equals the historical
+    primary-arm contract; other arms' reviews hash to different values."""
     return hashlib.sha256(json.dumps({
-        "schema": SCHEMA, "body_ids": BODY_IDS,
+        "schema": SCHEMA, "body_ids": tuple(body_ids),
         "driver": "raw-goals-per-joint;release-then-shoulder-lift;lift-arrival-before-transit;no-rest-interior-v3",
         "travel_speed": TRAVEL_SPEED, "press_speed": PRESS_SPEED, "tap_speed": TAP_SPEED,
         "tap_dwell_s": TAP_DWELL_S, "acc": ACC, "settle_tol": SETTLE_TOL,
@@ -60,30 +70,42 @@ class PathUnavailable(ValueError):
     """Missing/stale clearance evidence; never an invitation to invent a route."""
 
 
-def _pose(pose: dict) -> tuple[int, ...]:
-    if (set(pose) != set(BODY_IDS)
+def _pose(pose: dict, body_ids: tuple[int, ...] = BODY_IDS) -> tuple[int, ...]:
+    if (set(pose) != set(body_ids)
             or any(type(v) is not int or not 0 <= v <= 4095 for v in pose.values())):
-        raise PathUnavailable("Paths require complete recorded body poses (IDs 7–11 only)")
-    return tuple(pose[j] for j in BODY_IDS)
+        raise PathUnavailable(
+            f"Paths require complete recorded body poses (this arm's IDs {list(body_ids)} only)")
+    return tuple(pose[j] for j in body_ids)
 
 
-def _key(value) -> tuple[int, int]:
+def _key(value, fret_rows: frozenset[int] = PRIMARY_FRET_ROWS) -> tuple[int, int]:
     if (not isinstance(value, (list, tuple)) or len(value) != 2
             or any(type(v) is not int for v in value)
-            or not 1 <= value[0] <= 6 or not 1 <= value[1] <= 5):
-        raise PathUnavailable("Qualified keys must be [string, fret] integer pairs")
+            or not 1 <= value[0] <= 6 or value[1] not in fret_rows):
+        raise PathUnavailable(
+            f"Qualified keys must be [string, fret] integer pairs on this arm's rows {sorted(fret_rows)}")
     return tuple(value)
 
 
 @dataclass(frozen=True)
 class ClearancePaths:
-    """Immutable named poses/edges, bound to an operator-reviewed local snapshot."""
+    """Immutable named poses/edges, bound to an operator-reviewed local snapshot.
+
+    body_ids identifies the reviewed arm (ordered: yaw base first, roll wrist
+    last); fret_rows is that arm's owned rows. Defaults are the primary arm.
+    """
     poses: tuple[tuple[str, tuple[int, ...]], ...]
     keys: frozenset[tuple[int, int]]
     edges: frozenset[tuple[str, str]]
+    body_ids: tuple[int, ...] = BODY_IDS
+    fret_rows: frozenset[int] = PRIMARY_FRET_ROWS
 
     @classmethod
-    def from_snapshot(cls, snapshot: dict, keyframes_sha256: str, calibration: dict):
+    def from_snapshot(cls, snapshot: dict, keyframes_sha256: str, calibration: dict, *,
+                      body_ids: tuple[int, ...] = BODY_IDS,
+                      fret_rows: frozenset[int] = PRIMARY_FRET_ROWS):
+        body_ids = tuple(body_ids)
+        fret_rows = frozenset(fret_rows)
         if snapshot.get("warns"):
             raise PathUnavailable("Resolve keypoint naming/duplicate warnings before reviewing paths")
         review = calibration.get("qualified_profiles", {}).get(PROFILE)
@@ -96,23 +118,27 @@ class ClearancePaths:
         if (set(review) != required or review["schema_version"] != SCHEMA
                 or review["keyframes_sha256"] != keyframes_sha256
                 or review["calibration_sha256"] != calibration_digest(calibration)
-                or review["motion_contract"] != motion_contract()
+                or review["motion_contract"] != motion_contract(body_ids)
                 or not isinstance(review["qualified_at"], str) or not review["qualified_at"].strip()):
             raise PathUnavailable("Lift-first path review is missing/stale; inspect the current map and motion contract")
         if not isinstance(review["keys"], list) or not 1 <= len(review["keys"]) <= 30:
             raise PathUnavailable("Review a bounded subset of recorded contact/hover pairs first")
-        keys = frozenset(_key(k) for k in review["keys"])
+        keys = frozenset(_key(k, fret_rows) for k in review["keys"])
         if len(keys) != len(review["keys"]):
             raise PathUnavailable("Duplicate qualified key")
-        poses = {"rest": _pose(snapshot["rest"])}
+        poses = {"rest": _pose(snapshot["rest"], body_ids)}
         for key in sorted(keys):
             if key not in snapshot["cells"] or key not in snapshot.get("hovers", {}):
                 raise PathUnavailable(f"Missing recorded contact/hover pair for s{key[0]}f{key[1]}")
-            contact, hover = _pose(snapshot["cells"][key]), _pose(snapshot["hovers"][key])
-            # No yaw/roll retargeting during the lift or descent. Other joints
-            # still require a reviewed swept path; endpoint math cannot certify it.
-            if any(contact[BODY_IDS.index(j)] != hover[BODY_IDS.index(j)] for j in (7, 11)):
-                raise PathUnavailable(f"{hover_name(key)} must retain its contact's yaw/roll (IDs 7 and 11)")
+            contact, hover = (_pose(snapshot["cells"][key], body_ids),
+                              _pose(snapshot["hovers"][key], body_ids))
+            # No yaw/roll retargeting during the lift or descent (first/last body
+            # joints: base yaw and wrist roll on both arms). Other joints still
+            # require a reviewed swept path; endpoint math cannot certify it.
+            if contact[0] != hover[0] or contact[-1] != hover[-1]:
+                raise PathUnavailable(
+                    f"{hover_name(key)} must retain its contact's yaw/roll "
+                    f"(IDs {body_ids[0]} and {body_ids[-1]})")
             if max(abs(a - b) for a, b in zip(contact, hover)) <= PRESS_TOL + SETTLE_TOL:
                 raise PathUnavailable(f"{hover_name(key)} and contact have overlapping encoder-arrival regions")
             if hover == poses["rest"]:
@@ -129,7 +155,7 @@ class ClearancePaths:
                     or edge[0] == edge[1] or tuple(edge) in edges):
                 raise PathUnavailable("Transit edges must be unique directed rest/hover pairs; no contact via-points")
             edges.add(tuple(edge))
-        paths = cls(tuple(sorted(poses.items())), keys, frozenset(edges))
+        paths = cls(tuple(sorted(poses.items())), keys, frozenset(edges), body_ids, fret_rows)
         # Each admitted key must have reviewed entry AND exit, including a
         # cooperative stop after any note. Missing between-note edges fail later
         # at whole-phrase admission, before opening the serial port.
@@ -143,7 +169,7 @@ class ClearancePaths:
             counts = dict(self.poses)[name]
         except KeyError:
             raise PathUnavailable(f"Unreviewed pose: {name}") from None
-        return dict(zip(BODY_IDS, counts))
+        return dict(zip(self.body_ids, counts))
 
     def cost(self, source: str, target: str) -> int:
         poses = dict(self.poses)
@@ -177,7 +203,7 @@ class ClearancePaths:
 
     def compile(self, keys) -> dict:
         """Admit the COMPLETE phrase and every possible post-note exit, no motion."""
-        keys = tuple(_key(k) for k in keys)
+        keys = tuple(_key(k, self.fret_rows) for k in keys)
         if not keys or len(keys) > 64:
             raise PathUnavailable("Compile 1–64 keys at a time")
         if any(key not in self.keys for key in keys):
