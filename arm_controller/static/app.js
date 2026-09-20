@@ -151,10 +151,14 @@ async function previewTrajectory(notes) {
     const trace = result.trajectory;
     $('path-status').textContent = 'Lift → reviewed hover travel → tap → lift. No neutral between notes. ' +
       `${trace.joint_travel_proxy_counts} counts travel proxy (not time or proof of clearance).`;
+    // Single-arm trajectories carry exit_route; two-arm ones carry per-arm exit_routes.
+    const exits = trace.exit_route
+      ? trace.exit_route.join(' → ')
+      : Object.entries(trace.exit_routes || {}).map(([arm, route]) => `${arm}: ${route.join(' → ')}`).join('  |  ');
     $('path-trace').textContent = trace.notes.map((note, i) =>
-      `${i + 1}. ${trace.assignments[i].arm} s${note.string}f${note.fret}: ` +
+      `${i + 1}. ${(trace.assignments?.[i]?.arm) || note.arm || 'arm'} s${note.string}f${note.fret}: ` +
       note.stages.map(stage => `${stage.stage} ${stage.pose}`).join(' → ')).join('\n') +
-      '\nFinal parking only: ' + trace.exit_route.join(' → ');
+      '\nFinal parking only: ' + exits;
   } catch (error) {
     if (version === previewVersion) $('path-status').textContent = 'Path check unavailable; no playback. ' + error.message;
   } finally {

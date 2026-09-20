@@ -658,13 +658,51 @@ class ForceStopReq(StrictModel):
     pass  # explicit empty JSON body; the loopback middleware requires JSON
 
 
+def _park_after_force_stop():
+    """Operator policy (2026-09-20): after FORCE STOP — and only then — both
+    arms revert to their recorded rest. Waits for the frozen take to release
+    the serial buses, then parks each arm lift-first: shoulder/elbow/wrist-flex
+    rise to rest values before base/roll rotate, at slow speed. Best effort:
+    any failure leaves that arm frozen with torque held (the previous
+    behavior); normal takes and cooperative stops are unaffected."""
+    deadline = time.monotonic() + 20
+    while manager.busy and time.monotonic() < deadline:
+        time.sleep(0.25)
+    time.sleep(0.5)  # let the executor finish closing its serial handles
+    for module, port in ((fret, fret.FRET_PORT), (arm1, arm1.ARM1_PORT)):
+        try:
+            rest = module.load_map()["rest"]
+            ids = list(module.BODY_IDS) if hasattr(module, "BODY_IDS") else list(module.MOTOR_IDS)
+            bus = fret.FeetechBus(port, 1_000_000)
+        except Exception:
+            continue  # arm absent/limp state unchanged
+        try:
+            time.sleep(0.2)
+            for sid in ids:
+                bus.set_torque(sid, True)
+            # ids are role-ordered on both arms: base, shoulder, elbow, wrist_flex, wrist_roll
+            for group in (ids[1:4], (ids[0], ids[4])):
+                for sid in group:
+                    bus.goto(sid, rest[sid], speed=200)
+                settle = time.monotonic() + 8
+                while time.monotonic() < settle:
+                    if all((p := bus.read_pos(s)) is not None and abs(p - rest[s]) <= 30
+                           for s in group):
+                        break
+                    time.sleep(0.05)
+        except Exception:
+            pass  # frozen-with-torque remains the fallback state
+        finally:
+            bus.close()
+
+
 @app.post("/api/force-stop")
 def force_stop(_req: ForceStopReq):
     """Freeze the arm mid-motion NOW: every servo's goal is overwritten with its
     present position and torque stays ON so the arm holds instead of dropping.
     NOT a hardware E-stop (commands ride the same serial link — if the link is
-    wedged, cut servo power physically). The take ends as a fault/stop; recover
-    by moving to rest from /calibrate or the keyframe GUI."""
+    wedged, cut servo power physically). The take ends as a fault/stop; then —
+    force stop ONLY — both arms automatically revert to their recorded rest."""
     with _halt_lock:
         halt = _active_halt["event"]
     if halt is None:
@@ -673,11 +711,12 @@ def force_stop(_req: ForceStopReq):
     active = manager.active()
     if active and active.get("attempt_id"):
         try:
-            manager.stop(active["attempt_id"], reason="Force stop: arm frozen mid-path, torque held")
+            manager.stop(active["attempt_id"], reason="Force stop: arm frozen, then parked at rest")
         except RehearsalError:
             pass  # the executor is already unwinding via Halted
+    threading.Thread(target=_park_after_force_stop, daemon=True).start()
     return {"force_stop": True, "torque": "held",
-            "recovery": "arm frozen mid-path — move it to rest from /calibrate or the GUI"}
+            "recovery": "arms revert to rest automatically once the frozen take unwinds"}
 
 
 @app.get("/api/status")
