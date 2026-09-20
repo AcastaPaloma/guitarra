@@ -171,7 +171,7 @@ def test_executor_disconnect_is_body_only_no_homing_even_on_fault(monkeypatch):
     monkeypatch.setattr(fret, "FretArm", lambda **kwargs: arm)
     assert webapp.execute_take(plan(), registry(), threading.Event(), lambda event: None)
     arm.close.assert_called_once_with(torque_off=True)
-    arm.rest.assert_not_called()
+    arm.rest.assert_called_once_with()  # clean takes park at rest before torque-off
     arm.reset_mock()
     arm.tap_key.side_effect = TimeoutError("fixture")
     with pytest.raises(TimeoutError):

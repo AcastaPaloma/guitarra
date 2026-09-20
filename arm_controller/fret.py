@@ -129,13 +129,29 @@ def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
     return m["cells"], m["rest"], m["warns"]
 
 
+class Halted(RuntimeError):
+    """Force stop: motion was frozen at the present position, torque left ON so
+    the arm holds instead of dropping. NOT a hardware E-stop — the freeze is
+    commanded over the same serial link; if the link/driver is wedged, cut
+    servo power physically. Recovery: move to rest from /calibrate or the GUI."""
+
+
 class FretArm:
+    # Class-level defaults so partially constructed instances (tests build them
+    # via __new__) behave like the plain rest_hub arm with no halt wiring.
+    halt = None
+    path_profile = "rest_hub"
+
     def __init__(self, port=FRET_PORT, baud=BAUD, *, grid=None, row_rests=None,
-                 path_profile=None):
+                 path_profile=None, halt=None):
         """path_profile selects a fixed local staging family (never model data):
         "rest_hub" — every transition via the global rest; "row_hub" — via the
         operator-recorded per-row lifted hubs (requires row_rests). Default:
-        row_hub when hubs are available, else rest_hub."""
+        row_hub when hubs are available, else rest_hub.
+
+        halt: optional threading.Event. Once set, the next motion check (stage
+        entry or ~30ms settle poll) freezes every motor at its present position
+        and raises Halted."""
         if grid is not None:
             # The web executor supplies a validated immutable snapshot, not model
             # poses. Row hubs are only honored when explicitly passed alongside
@@ -152,6 +168,7 @@ class FretArm:
         if path_profile not in ("rest_hub", "row_hub"):
             raise ValueError(f"unknown path profile: {path_profile}")
         self.path_profile = path_profile
+        self.halt = halt
         self.bus = FeetechBus(port, baud)
         try:
             alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
@@ -181,10 +198,27 @@ class FretArm:
         if error:
             raise error
 
+    def _freeze(self):
+        """Overwrite every goal with the present position: the servo holds where
+        it is right now. Best-effort per motor; torque is deliberately left ON."""
+        for sid in MOTOR_IDS:
+            try:
+                pos = self.bus.read_pos(sid)
+                if pos is not None:
+                    self.bus.goto(sid, pos, speed=TRAVEL_SPEED, acc=ACC)
+            except Exception:  # noqa: BLE001 - freeze the remaining motors regardless
+                pass
+
+    def _check_halt(self):
+        if self.halt is not None and self.halt.is_set():
+            self._freeze()
+            raise Halted("force stop: arm frozen mid-path, torque held")
+
     def _move(self, pose, speed, wait=True, *, deadline=None, tol=SETTLE_TOL):
         if set(pose) != set(MOTOR_IDS) or any(type(v) is not int or not 0 <= v <= 4095
                                             for v in pose.values()):
             raise ValueError("A complete recorded body-joint pose is required")
+        self._check_halt()
         if deadline is not None and time.monotonic() >= deadline:
             raise TimeoutError("Attempt deadline reached before a motion stage")
         for sid, pos in pose.items():
@@ -194,6 +228,7 @@ class FretArm:
             if deadline is not None:
                 stage_deadline = min(stage_deadline, deadline)
             while time.monotonic() < stage_deadline:
+                self._check_halt()
                 if all((p := self.bus.read_pos(sid)) is not None and abs(p - t) <= tol
                        for sid, t in pose.items()):
                     return True  # encoder tolerance only, not string/contact evidence

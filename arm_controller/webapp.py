@@ -100,6 +100,12 @@ def read_registry():
                              "the backup/old fret map is not used automatically.") from None
 
 
+# Force stop: the executor publishes its halt event here so /api/force-stop can
+# freeze motion mid-stage. Only ever holds the CURRENT take's event, under lock.
+_halt_lock = threading.Lock()
+_active_halt = {"event": None}
+
+
 def execute_take(plan, registry, stop_event, emit):
     """Local execution only. No cloud call, arbitrary path, or model timing in the servo loop."""
     if stop_event.is_set():
@@ -109,10 +115,15 @@ def execute_take(plan, registry, stop_event, emit):
     if plan.path_profile not in registry.get("path_profiles", ("rest_hub",)):
         raise RehearsalError("Plan's path profile is no longer qualified on this rig")
     deadline = time.monotonic() + MAX_PLAY_SECONDS
+    halt = threading.Event()
     arm = fret.FretArm(grid=registry["grid"],
                        row_rests=registry["row_rests"] if plan.path_profile == "row_hub" else None,
-                       path_profile=plan.path_profile)
-    try:
+                       path_profile=plan.path_profile, halt=halt)
+    with _halt_lock:
+        _active_halt["event"] = halt
+
+    def run_notes():
+        # Every exit from this loop leaves the arm settled at a staging hub.
         for index, note in enumerate(plan.notes):
             if stop_event.is_set():
                 return False
@@ -122,11 +133,29 @@ def execute_take(plan, registry, stop_event, emit):
             if index < len(plan.notes) - 1 and stop_event.wait(note.pause_ms / 1000):
                 return False
         return not stop_event.is_set()
+
+    clean = False
+    try:
+        completed = run_notes()
+        clean = True
+        return completed
     finally:
-        # Every successful tap already lifted to rest. No extra homing on faults,
-        # Stop, exit, or disconnect. The operator must support the body for this.
-        # Never touch motor 12 or reassert grip while waiting for a cloud model.
-        arm.close(torque_off=True)
+        with _halt_lock:
+            _active_halt["event"] = None
+        # Completed/stopped takes end settled at a hub (with row_hub that hub is
+        # OVER the guitar), so PARK at the recorded global rest before releasing
+        # torque — never drop the arm onto the strings. On a FAULT: no recovery
+        # motion and body torque off (a stalled servo must not keep driving into
+        # whatever blocked it) — the operator supports the body, as before. On a
+        # FORCE STOP: goals were frozen at present positions, so torque is held
+        # and the arm stays put; recover via /calibrate or the GUI. Motor 12 is
+        # never touched either way.
+        if clean and not halt.is_set():
+            try:
+                arm.rest()
+            except Exception:  # noqa: BLE001 - failed park = uncertain state: release, no retry
+                pass
+        arm.close(torque_off=not halt.is_set())
 
 
 manager = RehearsalManager(RUN_ROOT, registry=read_registry, execute=execute_take,
@@ -289,6 +318,32 @@ def play(req: PlayReq):
 @app.post("/api/stop")
 def stop(req: AttemptReq):
     return manager.stop(req.attempt_id)
+
+
+class ForceStopReq(StrictModel):
+    pass  # explicit empty JSON body; the loopback middleware requires JSON
+
+
+@app.post("/api/force-stop")
+def force_stop(_req: ForceStopReq):
+    """Freeze the arm mid-motion NOW: every servo's goal is overwritten with its
+    present position and torque stays ON so the arm holds instead of dropping.
+    NOT a hardware E-stop (commands ride the same serial link — if the link is
+    wedged, cut servo power physically). The take ends as a fault/stop; recover
+    by moving to rest from /calibrate or the keyframe GUI."""
+    with _halt_lock:
+        halt = _active_halt["event"]
+    if halt is None:
+        raise RehearsalError("No take is executing right now; nothing to freeze")
+    halt.set()
+    active = manager.active()
+    if active and active.get("attempt_id"):
+        try:
+            manager.stop(active["attempt_id"], reason="Force stop: arm frozen mid-path, torque held")
+        except RehearsalError:
+            pass  # the executor is already unwinding via Halted
+    return {"force_stop": True, "torque": "held",
+            "recovery": "arm frozen mid-path — move it to rest from /calibrate or the GUI"}
 
 
 @app.get("/api/status")

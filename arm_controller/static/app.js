@@ -79,6 +79,7 @@ function controls() {
   $('play').disabled = running || foreignActive || !ready || !arrangement.length;
   $('confirm-play').disabled = running || !$('media-consent').checked || !$('supervised').checked;
   $('stop').disabled = !running && !foreignActive;
+  $('force-stop').disabled = !running && !foreignActive;
   for (const id of ['prompt', 'take-start', 'take-count', 'media-consent', 'supervised', 'session-select', 'change-song']) {
     $(id).disabled = running || foreignActive;
   }
@@ -204,6 +205,14 @@ function requestStop(reason = 'Stopped by operator.') {
   return stoppingPromise;
 }
 $('stop').onclick = () => { if (foreignActive) stoppingPromise = null; void requestStop(); };
+$('force-stop').onclick = async () => {
+  // No confirm dialog: this is the emergency control; a prompt would delay it.
+  try {
+    await api('/api/force-stop', {});
+    say('FORCE STOP — arm frozen mid-path, torque held. Recover via the calibrate page.', true);
+  } catch (error) { say('Force stop: ' + error.message, true); }
+  if (running) void requestStop('Force stop.');
+};
 
 function resetReview() {
   noteTrack.index = null; phaseTrack.phase = null;
