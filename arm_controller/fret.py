@@ -44,6 +44,8 @@ CLI:
   uv run --with pyserial python fret.py --seq 1,1 2,1 3,2   # tap several keys in order
   uv run --with pyserial python fret.py --hold 3 2
   uv run --with pyserial python fret.py --release --rest
+  uv run --with pyserial python fret.py --qualify-row-hubs  # supervised slow walk,
+      # then records the operator's row_hub qualification for the web console
 """
 import json
 import re
@@ -128,17 +130,28 @@ def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
 
 
 class FretArm:
-    def __init__(self, port=FRET_PORT, baud=BAUD, *, grid=None):
+    def __init__(self, port=FRET_PORT, baud=BAUD, *, grid=None, row_rests=None,
+                 path_profile=None):
+        """path_profile selects a fixed local staging family (never model data):
+        "rest_hub" — every transition via the global rest; "row_hub" — via the
+        operator-recorded per-row lifted hubs (requires row_rests). Default:
+        row_hub when hubs are available, else rest_hub."""
         if grid is not None:
             # The web executor supplies a validated immutable snapshot, not model
-            # poses. The (cells, rest, warns) view carries no row hubs or xyz, so
-            # every transition routes through the global rest hub.
+            # poses. Row hubs are only honored when explicitly passed alongside
+            # (same operator-recorded provenance as cells/rest).
             self.cells, self.rest_pose, self.warnings = grid
-            self.row_rests, self.xyz = {}, {}
+            self.row_rests = dict(row_rests) if row_rests else {}
+            self.xyz = {}
         else:
             m = load_map()
             self.cells, self.rest_pose, self.warnings = m["cells"], m["rest"], m["warns"]
             self.row_rests, self.xyz = m["row_rests"], m["xyz"]
+        if path_profile is None:
+            path_profile = "row_hub" if self.row_rests else "rest_hub"
+        if path_profile not in ("rest_hub", "row_hub"):
+            raise ValueError(f"unknown path profile: {path_profile}")
+        self.path_profile = path_profile
         self.bus = FeetechBus(port, baud)
         try:
             alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
@@ -198,7 +211,11 @@ class FretArm:
         return self.cells[(string, fret)]
 
     def _hub(self, fret):
-        """Lifted hub pose for a fret row; global rest if none recorded."""
+        """Staging hub for a fret row under the active path profile: the row's
+        recorded lifted hub in row_hub mode (rest if that row has none), the
+        global rest otherwise."""
+        if self.path_profile != "row_hub":
+            return self.rest_pose
         return self.row_rests.get(int(fret), self.rest_pose)
 
     def _lift(self):
@@ -248,7 +265,7 @@ class FretArm:
         self.holding, self.last_row = None, f
         return {"status": "command_completed", "string": s, "fret": f,
                 "note_open": STRING_NOTES.get(s), "stages": stages,
-                "xyz_cm": self.xyz.get((s, f)),
+                "xyz_cm": self.xyz.get((s, f)), "path_profile": self.path_profile,
                 "acoustic_success": "unknown", "contact_verified": False}
 
     def tap_sequence(self, keys, gap_s=0.3):
@@ -284,6 +301,50 @@ class FretArm:
         self._move(self.rest_pose, TRAVEL_SPEED)
         self.holding, self.last_row = None, None
         return {"status": "rest"}
+
+
+QUALIFY_SPEED = 180  # deliberately slow: the operator watches every move
+
+
+def qualify_row_hubs(arm):
+    """Supervised slow walk of every motion family the row_hub profile can
+    execute: each row hub, every press/lift in that row, and every hub-to-hub
+    crossing. The OPERATOR watches for scrapes/interference and then decides;
+    this routine records their decision, it does not qualify anything itself."""
+    if not arm.row_rests:
+        raise ValueError("no rest-r{N} row hubs recorded — record them first")
+    arm.path_profile = "row_hub"
+    rows = sorted(arm.row_rests)
+    print(f"row hubs {rows}; slow speed {QUALIFY_SPEED}. Watch the arm. Ctrl-C aborts.")
+    arm._move(arm.rest_pose, QUALIFY_SPEED)
+    for r in rows:
+        print(f"-- row {r}: hub, then each recorded press")
+        arm._move(arm._hub(r), QUALIFY_SPEED)
+        for (s, f) in sorted(k for k in arm.cells if k[1] == r):
+            arm._move(arm.cells[(s, f)], QUALIFY_SPEED, tol=PRESS_TOL)
+            arm._move(arm._hub(r), QUALIFY_SPEED)
+    print("-- hub-to-hub crossings")
+    for a in rows:
+        for b in rows:
+            if a != b:
+                arm._move(arm._hub(a), QUALIFY_SPEED)
+                arm._move(arm._hub(b), QUALIFY_SPEED)
+    arm._move(arm.rest_pose, QUALIFY_SPEED)
+    print("walk complete.")
+
+
+def record_row_hub_qualification():
+    """Persist the operator's decision, bound to the exact current keyframes."""
+    import hashlib
+
+    import kinematics
+    cal = json.loads(kinematics.CAL_PATH.read_text())
+    cal.setdefault("qualified_profiles", {})["row_hub"] = {
+        "keyframes_sha256": hashlib.sha256(KEYFRAMES_PATH.read_bytes()).hexdigest(),
+        "qualified_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    kinematics.CAL_PATH.write_text(json.dumps(cal, indent=2))
+    return cal["qualified_profiles"]["row_hub"]
 
 
 # The COMPLETE tool surface for the rig — single arm, tap-based. The pluck
@@ -443,6 +504,11 @@ if __name__ == "__main__":
     ap.add_argument("--hold", nargs=2, type=int, metavar=("STRING", "FRET"))
     ap.add_argument("--release", action="store_true")
     ap.add_argument("--rest", action="store_true")
+    ap.add_argument("--profile", choices=["auto", "rest_hub", "row_hub"], default="auto",
+                    help="staging family for --tap/--seq/--hold (auto: row_hub if hubs exist)")
+    ap.add_argument("--qualify-row-hubs", action="store_true",
+                    help="supervised slow walk of all row_hub motions, then record "
+                         "the operator's qualification decision")
     a = ap.parse_args()
 
     if a.list or a.pose or a.estimate:
@@ -461,10 +527,18 @@ if __name__ == "__main__":
                              indent=2))
         raise SystemExit(0)
 
-    arm = FretArm()
+    arm = FretArm(path_profile=None if a.profile == "auto" else a.profile)
     for w in arm.warnings:
         print("WARN:", w)
     try:
+        if a.qualify_row_hubs:
+            qualify_row_hubs(arm)
+            answer = input("Did every move stay clear of strings/neck/body? "
+                           "Type QUALIFIED to record, anything else to abort: ")
+            if answer.strip() == "QUALIFIED":
+                print("recorded:", record_row_hub_qualification())
+            else:
+                print("not recorded — row_hub stays unqualified")
         if a.tap:
             print(arm.tap_key(a.tap[0], a.tap[1]))
         if a.seq:

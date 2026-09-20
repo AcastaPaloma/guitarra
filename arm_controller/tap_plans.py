@@ -1,6 +1,9 @@
 """Symbolic tap plans and bounded revisions. No serial, microphone, or camera access.
 
-The only executable path profile is the existing rest hub. A model cannot supply
+Executable path profiles are a closed set of deterministic, operator-recorded
+staging families ("rest_hub" always; "row_hub" only after the operator runs the
+supervised qualification in fret.py --qualify-row-hubs). A model may only pick
+among the profiles the local registry reports as qualified; it cannot supply
 joint targets, speeds, contact times, clearance, calibration, or gripper settings.
 """
 from __future__ import annotations
@@ -55,9 +58,18 @@ class Note(Key):
     pause_ms: int = Field(default=DEFAULT_PAUSE_MS, ge=0, le=2000, multiple_of=50)
 
 
+# Closed set of executable staging families (fret.py implements both; the
+# model never supplies waypoints). "rest_hub": every tap routes via the global
+# rest pose. "row_hub": taps stage via the operator-recorded per-fret-row
+# lifted hubs (rest-r{N} keyframes) — much shorter travels within a row —
+# and requires prior operator qualification (fret.py --qualify-row-hubs).
+PATH_PROFILES = ("rest_hub", "row_hub")
+PathProfile = Literal["rest_hub", "row_hub"]
+
+
 class TapPlan(StrictModel):
     notes: list[Note] = Field(min_length=1, max_length=MAX_NOTES)
-    path_profile: Literal["rest_hub"] = "rest_hub"
+    path_profile: PathProfile = "rest_hub"
 
 
 class Arrangement(StrictModel):
@@ -73,7 +85,7 @@ class Proposal(StrictModel):
     decision: Literal["revise", "keep", "inspect"]
     rationale: str = Field(min_length=1, max_length=1000)
     notes: list[ProposedNote] = Field(min_length=1, max_length=MAX_TAKE_NOTES)
-    path_profile: Literal["rest_hub"]
+    path_profile: PathProfile
     inspection_notes: list[str] = Field(max_length=4)
 
 
@@ -110,7 +122,11 @@ def parse_reply(response: dict, schema: type[StrictModel]):
         raise BasetenError("Planner response failed completion/schema checks; no plan accepted") from None
 
 
-def validate_take(plan: TapPlan, keys: set[tuple[int, int]]) -> None:
+def validate_take(plan: TapPlan, keys: set[tuple[int, int]],
+                  allowed_profiles=("rest_hub",)) -> None:
+    if plan.path_profile not in allowed_profiles:
+        raise ValueError(f"Path profile '{plan.path_profile}' is not qualified on this rig; "
+                         f"qualified: {sorted(allowed_profiles)}")
     if len(plan.notes) > MAX_TAKE_NOTES:
         raise ValueError(f"Select a take of at most {MAX_TAKE_NOTES} notes")
     if any((n.string, n.fret) not in keys for n in plan.notes):
@@ -169,10 +185,17 @@ Propose at most ONE category of change, otherwise keep or request inspection:
   explain the musical tradeoff and require operator review. Never add/drop/duplicate notes.
 - positioning: choose ONE other RECORDED key of exactly the SAME pitch. No offsets or IK.
 
-The ONLY executable path profile is rest_hub. No qualified hover/collision-free shortcuts
-exist. Always preserve press -> rest -> press, required lift, contact dwell, and motor settings.
-You may request operator qualification of hover transitions in inspection_notes, but cannot
-invent joint angles, XYZ, waypoints, speeds, grip settings, force, or reduced clearance.
+- path: set path_profile to another profile listed in allowed_path_profiles (context).
+  Profiles are fixed, deterministic, operator-recorded staging families executed by
+  local code: rest_hub routes every tap via the global rest; row_hub stages via the
+  operator-recorded per-fret-row lifted hubs (shorter travels within a row). Only
+  profiles in allowed_path_profiles are qualified on this rig — proposing any other
+  is rejected. Switching profile changes travel staging only, never contact poses.
+
+Executable paths are ONLY these named profiles. Always preserve the required lift,
+contact dwell, and motor settings. You may request operator qualification of further
+shortcuts in inspection_notes, but cannot invent joint angles, XYZ, waypoints, speeds,
+grip settings, force, or reduced clearance.
 For uncertain evidence, prefer keep/inspect. Never claim the proposal is proven better/safer.
 
 Return ONLY JSON matching this schema. source_index refers to the supplied CURRENT plan
@@ -183,7 +206,8 @@ Return ONLY JSON matching this schema. source_index refers to the supplied CURRE
 """
 
 
-def compile_revision(proposal: Proposal, plan: TapPlan, keys: set[tuple[int, int]]) -> dict:
+def compile_revision(proposal: Proposal, plan: TapPlan, keys: set[tuple[int, int]],
+                     allowed_profiles=("rest_hub",)) -> dict:
     """Validate a proposal independently; never dispatch it or clamp unsafe output."""
     before = plan.notes
     indices = [n.source_index for n in proposal.notes]
@@ -192,6 +216,13 @@ def compile_revision(proposal: Proposal, plan: TapPlan, keys: set[tuple[int, int
     if any(len(text) > 500 for text in proposal.inspection_notes):
         raise ValueError("Inspection note too long")
     changes, categories = [], set()
+    if proposal.path_profile != plan.path_profile:
+        if proposal.path_profile not in allowed_profiles:
+            raise ValueError("Proposed path profile is not qualified on this rig")
+        categories.add("path")
+        changes.append({"kind": "path", "before": plan.path_profile,
+                        "after": proposal.path_profile,
+                        "warning": "Staging family change; contact poses are unchanged"})
     if indices != list(range(len(before))):
         swapped = [i for i, source in enumerate(indices) if i != source]
         if len(swapped) != 2 or swapped[1] != swapped[0] + 1:
@@ -226,18 +257,21 @@ def compile_revision(proposal: Proposal, plan: TapPlan, keys: set[tuple[int, int
         raise ValueError("Too many changes for one attempt")
     if (proposal.decision == "revise") != bool(changes):
         raise ValueError("Revision decision and actual changes disagree")
-    candidate = TapPlan(notes=[Note(**n.model_dump(exclude={"source_index"})) for n in proposal.notes])
-    validate_take(candidate, keys)
+    candidate = TapPlan(notes=[Note(**n.model_dump(exclude={"source_index"})) for n in proposal.notes],
+                        path_profile=proposal.path_profile)
+    validate_take(candidate, keys, allowed_profiles)
     return {"decision": proposal.decision, "rationale": proposal.rationale,
             "inspection_notes": proposal.inspection_notes, "changes": changes,
             "plan": candidate.model_dump(), "operator_approval_required": True,
             "motion_authority": False, "is_physical_qualification": False}
 
 
-def propose_revision(plan: TapPlan, keys, assessment: dict, telemetry: list[dict], *, history=None) -> dict:
+def propose_revision(plan: TapPlan, keys, assessment: dict, telemetry: list[dict], *,
+                     history=None, allowed_profiles=("rest_hub",)) -> dict:
     client = BasetenClient(effort="low", timeout_s=60, max_tokens=4096)
     context = {"current_plan": plan.model_dump(), "available_keys": key_context(keys),
-               "allowed_path_profiles": ["rest_hub"], "untrusted_audio_assessment": assessment,
+               "allowed_path_profiles": sorted(allowed_profiles),
+               "untrusted_audio_assessment": assessment,
                "command_telemetry_not_acoustic_truth": telemetry,
                "untrusted_previous_attempts": (history or [])[-3:],
                "comparison_clip_available": False}
@@ -246,7 +280,7 @@ def propose_revision(plan: TapPlan, keys, assessment: dict, telemetry: list[dict
         {"role": "user", "content": json.dumps(context, allow_nan=False)},
     ], response_format={"type": "json_object"})
     proposal = parse_reply(response, Proposal)
-    result = compile_revision(proposal, plan, keys)
+    result = compile_revision(proposal, plan, keys, allowed_profiles)
     result["model"] = client.model
     return result
 
@@ -257,5 +291,6 @@ def expected_phrase(plan: TapPlan) -> str:
         "notes": [{**n.model_dump(), "pitch": pitch(n.string, n.fret)} for n in plan.notes],
         "timing": "pause_ms is a local pause AFTER the complete tap and lift, not an onset interval. "
                   "No precise beat/onset schedule is specified; do not invent one. Last pause is unused.",
-        "path": "rest_hub; command/encoder state does not establish audible notes or clearance",
+        "path": f"{plan.path_profile}; command/encoder state does not establish "
+                "audible notes or clearance",
     })

@@ -74,13 +74,27 @@ def read_registry():
             if (set(positions) != {str(s) for s in fret.MOTOR_IDS}
                     or any(type(v) is not int or not 0 <= v <= 4095 for v in positions.values())):
                 raise ValueError("Keypoints must contain complete raw body-joint poses only")
-        grid = fret.load_grid(entries=entries)
-        cells, rest, warnings = grid
+        snapshot = fret.load_map(entries=entries)
+        cells, rest, warnings = snapshot["cells"], snapshot["rest"], snapshot["warns"]
+        grid = (cells, rest, warnings)
         if not cells or set(rest) != set(fret.MOTOR_IDS):
             raise ValueError("Record a rest pose and the needed keys first")
-        signature = b"rest_hub-v2:400:1200:0.12:30:90:4.0"  # +press tol 90 (contact stall)
+        # row_hub is executable only when the OPERATOR qualified it against these
+        # exact keyframe bytes (fret.py --qualify-row-hubs) and every recorded
+        # row still has its hub. Any keypoint edit invalidates it automatically.
+        row_rests = snapshot["row_rests"]
+        profiles = ["rest_hub"]
+        row_hub = json.loads(calibration_bytes).get("qualified_profiles", {}).get("row_hub", {})
+        if (isinstance(row_hub, dict)
+                and row_hub.get("keyframes_sha256") == hashlib.sha256(raw).hexdigest()
+                and row_rests and {f for _, f in cells} <= set(row_rests)):
+            profiles.append("row_hub")
+        signature = (b"rest_hub-v2:400:1200:0.12:30:90:4.0:profiles="
+                     + ",".join(sorted(profiles)).encode())
         fingerprint = hashlib.sha256(raw + b"\0" + calibration_bytes + signature).hexdigest()
-        return {"keys": set(cells), "grid": grid, "fingerprint": fingerprint, "warnings": warnings}
+        return {"keys": set(cells), "grid": grid, "row_rests": row_rests,
+                "path_profiles": tuple(profiles), "fingerprint": fingerprint,
+                "warnings": warnings}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         raise RehearsalError("No valid current keypoint grid/rest pose. Calibrate first; "
                              "the backup/old fret map is not used automatically.") from None
@@ -92,8 +106,12 @@ def execute_take(plan, registry, stop_event, emit):
         return False
     if read_registry()["fingerprint"] != registry["fingerprint"]:
         raise RehearsalError("Calibration changed before connection")
+    if plan.path_profile not in registry.get("path_profiles", ("rest_hub",)):
+        raise RehearsalError("Plan's path profile is no longer qualified on this rig")
     deadline = time.monotonic() + MAX_PLAY_SECONDS
-    arm = fret.FretArm(grid=registry["grid"])
+    arm = fret.FretArm(grid=registry["grid"],
+                       row_rests=registry["row_rests"] if plan.path_profile == "row_hub" else None,
+                       path_profile=plan.path_profile)
     try:
         for index, note in enumerate(plan.notes):
             if stop_event.is_set():
@@ -218,13 +236,14 @@ def bootstrap():
         keys, warning = key_context(registry["keys"]), None
     except RehearsalError as exc:
         registry, keys, warning = None, [], str(exc)
+    profiles = list(registry.get("path_profiles", ("rest_hub",))) if registry else ["rest_hub"]
     audio_model = os.environ.get("BASETEN_AUDIO_MODEL") or DEFAULT_AUDIO_MODEL
     return {"session_token": SESSION_TOKEN, "keys": keys, "warning": warning,
             "keypoint_warnings": registry["warnings"] if registry else [],
             "max_notes": MAX_NOTES, "max_take_notes": MAX_TAKE_NOTES, "max_attempts": MAX_ATTEMPTS,
             "max_capture_seconds": MAX_CAPTURE_SECONDS, "hardware": "real_single_tap_arm",
             "camera": False, "plucking": False, "auto_replay": False,
-            "path_profiles": ["rest_hub"], "shortcuts_qualified": False,
+            "path_profiles": profiles, "shortcuts_qualified": "row_hub" in profiles,
             "key_present": bool(os.environ.get("BASETEN_API_KEY") or os.environ.get("BASETEN")),
             "planner_model": os.environ.get("BASETEN_MODEL") or DEFAULT_MODEL,
             "audio_model": audio_model, "audio_model_supported": audio_model in AUDIO_MODELS,

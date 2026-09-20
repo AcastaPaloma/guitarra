@@ -35,12 +35,12 @@ def evaluate(*args, **kwargs):
             "summary": "Offline fixture only.", "observations": [], "limitations": ["Mock model, synthetic audio."]}}
 
 
-def revise(take, keys, assessment, telemetry, *, history=None):
+def revise(take, keys, assessment, telemetry, *, history=None, allowed_profiles=("rest_hub",)):
     notes = [{**n.model_dump(), "source_index": i} for i, n in enumerate(take.notes)]
     notes[0]["pause_ms"] += 50
     proposal = Proposal(decision="revise", rationale="Offline fixture proposal.", notes=notes,
-                        path_profile="rest_hub", inspection_notes=[])
-    return compile_revision(proposal, take, keys)
+                        path_profile=take.path_profile, inspection_notes=[])
+    return compile_revision(proposal, take, keys, allowed_profiles)
 
 
 def wav_bytes(silence=False):

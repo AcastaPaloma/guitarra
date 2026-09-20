@@ -191,7 +191,8 @@ class RehearsalManager:
             if parent_attempt_id and source_attempt_id:
                 raise RehearsalError("Choose a new proposal OR a saved performed tuning")
             registry = self.registry()
-            validate_take(plan, registry["keys"])
+            validate_take(plan, registry["keys"],
+                          registry.get("path_profiles", ("rest_hub",)))
             number, parent, source = 1, None, None
             if parent_attempt_id:
                 parent = self._get(parent_attempt_id)
@@ -471,7 +472,8 @@ class RehearsalManager:
                 self._phase(attempt, "revising", timeout=65)
             history = self.archive.planner_context(record["session_id"], record["attempt_id"])
             revision = self.revise(plan, attempt.registry["keys"], assessment, copy.deepcopy(record["telemetry"]),
-                                   history=history)
+                                   history=history,
+                                   allowed_profiles=attempt.registry.get("path_profiles", ("rest_hub",)))
             with self.lock:
                 if attempt.stop.is_set():
                     self._finish(attempt, "stopped", record["error"])

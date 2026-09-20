@@ -122,7 +122,7 @@ remain in the session and bounded planner context; there is no unattended budget
 | Timing | Change up to three post-lift pauses, by at most **100ms** each, on a **50ms** grid in 0–2000ms. The last, unused pause cannot be “optimized.” |
 | Ordering | Swap one adjacent pair of existing events. The UI warns that this changes the musical arrangement; it is not a path-only optimization. No note insertion/deletion/duplication. |
 | Positioning | Select one other **currently recorded key of identical pitch**. No joint/XYZ offsets, inverse kinematics, contact-depth changes, or new poses. The current 18-key fret-1–3 set has no alternate same-pitch locations, so this normally offers no positioning change. |
-| Paths | Only `rest_hub` exists. Direct A→B/hover shortcuts are **rejected**, not silently clamped or interpreted. |
+| Paths | Switch `path_profile` between **named, operator-qualified profiles only** (see below). `rest_hub` always exists; `row_hub` appears only after the operator runs `fret.py --qualify-row-hubs` and confirms. Direct A→B/hover shortcuts, waypoints, or any other invented path are **rejected**, not silently clamped or interpreted. |
 
 Only **one category per attempt** can change. The model cannot change speed,
 acceleration, dwell, gripper state/torque, protection, limits, calibration, the
@@ -135,19 +135,31 @@ and encoder readiness, not verified contact or the moment sound began. The evalu
 is told that exact intended attack times are unspecified. This is not a demonstration
 of millisecond timing correction, nor a guarantee of improvement.
 
-### Why the shorter A→B route is not enabled yet
+### Path profiles: `rest_hub` and the qualified `row_hub`
 
-The active map contains contact/rest recordings, not a physically qualified hover
-surface/transition library. The derived XYZ layer also has unverified joint signs
-and offsets. Neither an audio explanation, endpoint pose, nor interpolation can
-certify the swept arm/tool path clears every unintended string and the guitar neck.
+`rest_hub` routes every tap press → global rest → press. `row_hub` stages via the
+operator-recorded per-fret-row lifted hubs (`rest-r{N}` keyframes): lift to the
+current row's hub, cross hubs only on a row change, press — much shorter travels
+within a row. Both are fixed staging families executed by local code
+(`fret.py`); a model can only *select* one from `allowed_path_profiles`, never
+supply waypoints, joints, XYZ, or speeds.
 
-The next **separate operator qualification** is to record/validate lift/hover/approach
-transitions for a small subset, check full-arm swept clearance and stop behavior,
-and measure them against the rest-hub baseline. Only then should local code expose
-named approved profiles for model selection. This change creates **no** hover paths
-or qualification flag that a model/browser can unlock. Even the existing rest route
-is not presented as an unconditional collision-free guarantee.
+`row_hub` becomes selectable ONLY through a human-in-the-loop qualification:
+the operator runs `fret.py --qualify-row-hubs` (a slow supervised walk of every
+hub, every press/lift in each row, and every hub-to-hub crossing), watches for
+scrapes/interference, and types QUALIFIED at the local terminal. That records
+the decision in `calibration_arm2.json` **bound to the sha256 of the exact
+keyframe bytes** — any keypoint edit silently un-qualifies it. The web console
+and the browser cannot set or forge this flag; the registry re-derives it from
+disk on every read and the capability fingerprint covers it, so a mid-session
+change expires outstanding proposals. Neither profile is presented as an
+unconditional collision-free guarantee.
+
+Hover/direct A→B shortcuts still do not exist: the derived XYZ layer has
+unverified joint signs/offsets, and no audio explanation, endpoint pose, or
+interpolation can certify swept clearance. Any future hover library needs its
+own recorded transitions and a separate operator qualification of this same
+shape before local code may name it as a profile.
 
 ## Capture, ownership, budgets, and failure behavior
 

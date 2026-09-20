@@ -5,6 +5,10 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const terminal = new Set(['review_ready', 'keep', 'inspect', 'unavailable', 'stopped', 'fault', 'expired']);
 const storageKey = 'guitarra.rehearsal.session.v1';
 let config, arrangement = [], arrangementTitle = '', parentId = null, sourceId = null, sessionId = null;
+let pathProfile = 'rest_hub';
+// Best staging family the local registry reports as operator-qualified. The UI
+// only ever picks from config.path_profiles; it cannot invent a path.
+const defaultProfile = () => (config?.path_profiles || []).includes('row_hub') ? 'row_hub' : 'rest_hub';
 let running = false, cancelled = false, current = null, recorder = null, playSubmitted = false;
 let heartbeatTimer, meterTimer, audioUrl, historyAudioUrl, lastReview, sessionHistory;
 let foreignActive = false, stoppingPromise = null;
@@ -110,11 +114,12 @@ function selectTake() {
   document.querySelectorAll('.note').forEach((node, index) => {
     node.className = 'note' + (index >= start && index < start + count ? ' selected' : '');
   });
-  $('selected').textContent = (parentId ? 'proposed · ' : '') + 'rest-hub' + (notes.length > 1 ? ' · pauses after lift: ' + notes.slice(0, -1).map(n => n.pause_ms + 'ms').join(' / ') : ' · one tap');
+  $('selected').textContent = (parentId ? 'proposed · ' : '') + pathProfile.replace('_', '-') + (notes.length > 1 ? ' · pauses after lift: ' + notes.slice(0, -1).map(n => n.pause_ms + 'ms').join(' / ') : ' · one tap');
 }
 
-function showArrangement(notes, title) {
+function showArrangement(notes, title, profile) {
   arrangement = notes.map(n => ({string: n.string, fret: n.fret, pause_ms: n.pause_ms ?? 250}));
+  pathProfile = profile || defaultProfile();
   arrangementTitle = title;
   $('title').textContent = title;
   $('notes').replaceChildren(...arrangement.map((n, i) => {
@@ -249,6 +254,7 @@ function list(id, values) { $(id).replaceChildren(...values.map(text => textNode
 function changeText(change) {
   if (change.kind === 'timing') return `Note ${change.note_index + 1}: post-lift pause ${change.before_ms} → ${change.after_ms}ms`;
   if (change.kind === 'positioning') return `Note ${change.note_index + 1}: s${change.before.string}/f${change.before.fret} → s${change.after.string}/f${change.after.fret}, same pitch`;
+  if (change.kind === 'path') return `Path staging ${change.before} → ${change.after}; same contact poses, shorter travels`;
   return `Order ${change.before.map(i => i + 1).join('–')} → ${change.after.map(i => i + 1).join('–')}. Changes the arrangement.`;
 }
 
@@ -280,7 +286,7 @@ function showReview(record) {
 async function runTake() {
   if (running || !$('media-consent').checked || !$('supervised').checked) return;
   const selected = selection();
-  const plan = {notes: selected.notes, path_profile: 'rest_hub'};
+  const plan = {notes: selected.notes, path_profile: pathProfile};
   running = true; cancelled = false; current = null; stoppingPromise = null; playSubmitted = false;
   controls(); resetReview(); step(2); say('Preparing microphone…');
   try {
@@ -361,7 +367,8 @@ async function runTake() {
       const proposed = current.phase === 'review_ready' && current.revision;
       parentId = proposed ? current.attempt_id : null;
       sourceId = proposed ? null : current.attempt_id;
-      showArrangement(proposed ? current.revision.plan.notes : current.plan.notes, arrangementTitle);
+      showArrangement(proposed ? current.revision.plan.notes : current.plan.notes, arrangementTitle,
+                      proposed ? current.revision.plan.path_profile : current.plan.path_profile);
     }
     running = false;
     if (sessionId) await refreshHistory(sessionId).catch(() => {});
@@ -372,14 +379,14 @@ async function runTake() {
 $('apply').onclick = () => {
   if (lastReview?.phase !== 'review_ready') return;
   parentId = lastReview.attempt_id; sourceId = null;
-  showArrangement(lastReview.revision.plan.notes, arrangementTitle);
+  showArrangement(lastReview.revision.plan.notes, arrangementTitle, lastReview.revision.plan.path_profile);
   say('Proposed tuning staged. Start only after inspection/confirmation.');
   confirmTake();
 };
 $('repeat').onclick = () => {
   if (lastReview?.playback_outcome !== 'completed') return;
   parentId = null; sourceId = lastReview.attempt_id;
-  showArrangement(lastReview.plan.notes, arrangementTitle); confirmTake();
+  showArrangement(lastReview.plan.notes, arrangementTitle, lastReview.plan.path_profile); confirmTake();
 };
 
 async function refreshSessions() {
@@ -436,7 +443,7 @@ async function refreshHistory(id) {
 function useTuning(take) {
   if (!take.can_load_tuning || running) return;
   sessionId = sessionHistory.session_id; parentId = null; sourceId = take.attempt_id; rememberSession();
-  showArrangement(take.plan.notes, sessionHistory.title); switchTab(false);
+  showArrangement(take.plan.notes, sessionHistory.title, take.plan.path_profile); switchTab(false);
   $('review').hidden = true; lastReview = null; controls();
   say(`Loaded Take ${take.take_number}'s tuning. No motion started; fresh admission/confirmation required.`);
 }
