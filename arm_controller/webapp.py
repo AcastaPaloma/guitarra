@@ -785,7 +785,17 @@ def sessions():
 
 @app.get("/api/sessions/{session_id}")
 def session_history(session_id: str):
-    return manager.history(session_id)
+    history = manager.history(session_id)
+    # A saved tuning binds to the calibration fingerprint of its take. Flag
+    # stale ones so the UI doesn't auto-load a tuning the server will refuse
+    # (every keypoint/hover/contract change rotates the fingerprint).
+    try:
+        current = read_registry()["fingerprint"]
+    except RehearsalError:
+        current = None
+    for take in history.get("takes", []):
+        take["tuning_current"] = bool(current) and take.get("capability_fingerprint") == current
+    return history
 
 
 @app.post("/api/sessions/{session_id}/preferred")

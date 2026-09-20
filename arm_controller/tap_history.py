@@ -135,6 +135,7 @@ class SessionArchive:
                 "audio_available": bool(record.get("capture") or record.get("partial_capture")),
                 "audio_incomplete": bool(record.get("partial_capture") and not record.get("capture")),
                 "can_load_tuning": completed,
+                "capability_fingerprint": record.get("capability_fingerprint"),
                 "preferred_by_operator": record["attempt_id"] == session.get("preferred_attempt_id"),
             })
         return {**session, "takes": rows, "max_session_takes": MAX_SESSION_TAKES,

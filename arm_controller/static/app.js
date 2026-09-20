@@ -230,8 +230,18 @@ $('convert').onclick = async () => {
   finally { running = false; controls(); }
 };
 
+const consentKey = 'guitarra.standing-consent.v1';
 function confirmTake() {
   if (running || foreignActive || !arrangement.length || !pathReady) return;
+  let standing = false;
+  try { standing = localStorage.getItem(consentKey) === 'granted'; } catch (_) { /* no storage */ }
+  if (standing) {
+    // Operator granted standing consent once; each take still sends explicit
+    // consent flags to the server — this only skips re-ticking the boxes.
+    $('media-consent').checked = true; $('supervised').checked = true;
+    void runTake();
+    return;
+  }
   $('media-consent').checked = false; $('supervised').checked = false;
   $('confirm-description').textContent = parentId ? 'Try the proposed tuning shown below. One take, then review.' :
     sourceId ? 'Continue this session with the saved tuning. Inspect the arm before this new supervised set.' :
@@ -242,6 +252,7 @@ $('play').onclick = confirmTake;
 $('cancel-play').onclick = () => $('consent-dialog').close();
 $('confirm-play').onclick = () => {
   if (!$('media-consent').checked || !$('supervised').checked) return;
+  try { localStorage.setItem(consentKey, 'granted'); } catch (_) { /* session-only consent */ }
   $('consent-dialog').close(); void runTake();
 };
 
@@ -628,8 +639,12 @@ window.addEventListener('pagehide', () => {
       sessionId = sessions.some(s => s.session_id === remembered) ? remembered : sessions[0].session_id;
       $('session-select').value = sessionId;
       const history = await refreshHistory(sessionId);
-      const saved = history.takes.find(t => t.preferred_by_operator && t.can_load_tuning) || [...history.takes].reverse().find(t => t.can_load_tuning);
+      const loadable = t => t.can_load_tuning && t.tuning_current !== false;
+      const saved = history.takes.find(t => t.preferred_by_operator && loadable(t)) || [...history.takes].reverse().find(loadable);
       if (saved && !foreignActive) useTuning(saved); // load symbolic settings only, NEVER resume motion/capture
+      else if (!foreignActive && history.takes.some(t => t.can_load_tuning)) {
+        say('Calibration changed since your saved tunings — MAKE NOTES to replan (nothing is broken).');
+      }
     }
     controls();
   } catch (error) { say(`Console unavailable: ${error.message}`, true); }
