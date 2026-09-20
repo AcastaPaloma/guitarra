@@ -1,4 +1,4 @@
-"""row_hub path profile: qualification gating, bounded path revisions, registry."""
+"""Legacy profile history stays readable but cannot unlock lift-first playback."""
 import hashlib
 import json
 
@@ -28,7 +28,7 @@ def test_validate_take_gates_on_qualified_profiles():
     with pytest.raises(ValueError, match="not qualified"):
         validate_take(make_plan("row_hub"), KEYS)
     validate_take(make_plan("row_hub"), KEYS, BOTH)
-    validate_take(make_plan(), KEYS)  # rest_hub always allowed
+    validate_take(make_plan(), KEYS)  # legacy schema validation, not real-path admission
 
 
 def test_unknown_profile_rejected_by_schema():
@@ -71,19 +71,21 @@ def _write_rig(tmp_path, monkeypatch, *, qualified=True, with_hub=True):
     monkeypatch.setattr(webapp, "HERE", tmp_path)
 
 
-def test_registry_offers_row_hub_only_when_operator_qualified(tmp_path, monkeypatch):
+def test_legacy_row_hub_review_does_not_qualify_lift_first(tmp_path, monkeypatch):
     _write_rig(tmp_path, monkeypatch)
-    assert webapp.read_registry()["path_profiles"] == ("rest_hub", "row_hub")
+    registry = webapp.read_registry()
+    assert registry["path_profiles"] == ()
+    assert "hover" in registry["path_blocker"]
 
 
 def test_registry_drops_row_hub_when_keyframes_changed(tmp_path, monkeypatch):
     _write_rig(tmp_path, monkeypatch, qualified=False)
-    assert webapp.read_registry()["path_profiles"] == ("rest_hub",)
+    assert webapp.read_registry()["path_profiles"] == ()
 
 
 def test_registry_drops_row_hub_without_hubs_for_every_row(tmp_path, monkeypatch):
     _write_rig(tmp_path, monkeypatch, with_hub=False)
-    assert webapp.read_registry()["path_profiles"] == ("rest_hub",)
+    assert webapp.read_registry()["path_profiles"] == ()
 
 
 def test_registry_fingerprint_tracks_qualification(tmp_path, monkeypatch):

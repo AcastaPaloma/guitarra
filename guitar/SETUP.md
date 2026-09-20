@@ -66,11 +66,17 @@ not the older fake console below. See [arm_controller/REHEARSAL.md](../arm_contr
 for browser mic consent, one bounded audio/model review, a proposed diff, and a
 separate operator-approved Play. No automatic physical replay or camera input.
 
-Current blockers: `arm_controller/keyframes_arm2.json` is empty, Inkling's last
-live audio probe timed out, and physical/thermal qualification remains unresolved.
-Do not restore old maps or infer readiness from offline checks. The new web executor
-releases **body-joint torque only** at disconnect before cloud waits—support the body;
-tool-gripper 12 is never commanded. New/offline checks:
+Current motion blocker: the v4 map has **25 contact keys but no per-key hovers or
+lift-first path qualification**. The web player now refuses contact-only rest/row-hub
+routes rather than repeating the reported diagonal/scraping-prone motion. See
+[PATHS.md](../arm_controller/PATHS.md) for whole-phrase preview, named lift/hover paths,
+and the pending second tap arm's dedicated rows 7–11 (not enabled). No old map is restored.
+Physical/thermal qualification and live audio verification remain unresolved; see
+[STATUS.md](STATUS.md) and [audio setup](model/AUDIO.md).
+Current clean web completion parks via a reviewed final exit and **holds body torque**;
+faults release body torque without recovery motion, force stop holds frozen goals.
+Support the body and respect protection; no independent thermal watchdog is supplied.
+Tool-gripper 12 is never commanded. New/offline checks:
 
 ```bash
 guitar/.venv/bin/python -m pytest arm_controller/tests guitar/tests -q

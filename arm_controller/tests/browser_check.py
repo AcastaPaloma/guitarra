@@ -68,6 +68,9 @@ class Fixture:
                 {"string": 1, "fret": 1, "pitch": "F4"}, {"string": 1, "fret": 2, "pitch": "F#4"}],
                 "warning": "OFFLINE UI FIXTURE — not a real performance or assessment.",
                 "max_take_notes": 4, "max_attempts": 3, "max_capture_seconds": 60,
+                "path_profiles": ["lift_first"], "preferred_path_profile": "lift_first",
+                "paths_ready": self.mode != "missing_path", "recorded_hover_count": 2,
+                "path_blocker": "Fixture missing hover review" if self.mode == "missing_path" else None,
                 "key_present": True, "audio_model_supported": True, "active_attempt": None,
                 "planner_model": "mock", "audio_model": "mock", "audio_endpoint_status": "mocked only"}
         elif path == "/api/sessions":
@@ -80,6 +83,15 @@ class Fixture:
         elif path == "/api/plan":
             response = {"title": "Offline UI fixture", "notes": [
                 {"string": 1, "fret": 1, "pause_ms": 250}, {"string": 1, "fret": 2, "pause_ms": 250}]}
+        elif path == "/api/trajectory":
+            notes = request.post_data_json["plan"]["notes"]
+            response = {"executable": self.mode != "missing_path",
+                        "blockers": ["Fixture missing hover review"] if self.mode == "missing_path" else [],
+                        "trajectory": {"neutral_visits_between_notes": 0, "joint_travel_proxy_counts": 400,
+                            "exit_route": ["rest"], "assignments": [{"arm": n["arm"]} for n in notes],
+                            "notes": [{**n, "stages": [{"stage": "travel", "pose": f"hover-r{n['fret']}-c{n['string']}"},
+                                {"stage": "tap", "pose": f"key-r{n['fret']}-c{n['string']}"},
+                                {"stage": "lift_clear", "pose": f"hover-r{n['fret']}-c{n['string']}"}]} for n in notes]}}
         elif path == "/api/attempts":
             body = request.post_data_json
             assert body["allow_audio_upload"] and body["allow_revision_inference"] and body["supervised_and_supported"]
@@ -142,7 +154,7 @@ class Fixture:
                             "limitations": ["Generated audio and mocked model, not acoustic evidence."]}, revision={
                             "decision": "revise", "rationale": "Fixture pause change; no proven improvement.",
                             "changes": [{"kind": "timing", "note_index": 0, "before_ms": before, "after_ms": before + 50}],
-                            "inspection_notes": ["No shortcut is qualified."], "plan": {"notes": notes, "path_profile": "rest_hub"}})
+                            "inspection_notes": ["No shortcut is qualified."], "plan": {"notes": notes, "path_profile": "lift_first"}})
             response = self.public(record)
         if response is None:
             # NEVER fall through to a physical/model endpoint, even for unexpected requests.
@@ -171,7 +183,7 @@ def run(url, output):
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel="chrome", headless=True,
                                      args=["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"])
-        for mode in ("success", "deny", "late", "stop", "unavailable", "disconnect"):
+        for mode in ("success", "deny", "late", "stop", "unavailable", "disconnect", "missing_path"):
             context = browser.new_context(permissions=["microphone"]); context.add_init_script(INIT)
             page, errors = context.new_page(), []
             page.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
@@ -182,6 +194,17 @@ def run(url, output):
             assert page.evaluate("window.testMicCalls.length") == 0
             page.locator("#prompt").fill("Offline fixture only"); page.locator("#convert").click()
             expect(page.locator("#plan")).to_be_visible()
+            if mode == "missing_path":
+                expect(page.locator("#path-status")).to_contain_text("Playback blocked")
+                expect(page.locator("#play")).to_be_disabled()
+                assert page.evaluate("window.testMicCalls.length") == 0
+                assert not fixture.records and fixture.plays == 0 and not errors
+                evidence["cases"].append({"case": mode, "passed": True, "play_requests": 0,
+                                          "microphone_requests": 0, "javascript_errors": errors})
+                context.close()
+                continue
+            expect(page.locator("#play")).to_be_enabled()
+            expect(page.locator("#path-status")).to_contain_text("No neutral between notes")
             page.locator("#play").click()
             assert fixture.plays == 0
             consent(page)

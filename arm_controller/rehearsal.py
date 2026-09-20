@@ -94,11 +94,12 @@ def utc_now():
 
 
 class RehearsalManager:
-    def __init__(self, root: Path, *, registry, execute, lock=None, calibration_active=lambda: False,
+    def __init__(self, root: Path, *, registry, execute, admit=None, lock=None, calibration_active=lambda: False,
                  evaluate=evaluate_file, revise=propose_revision, clock=time.monotonic):
         self.root = Path(root)
         self.registry = registry
         self.execute = execute
+        self.admit = admit  # production checks the whole path before reserving/mic startup
         self.calibration_active = calibration_active
         self.evaluate = evaluate
         self.revise = revise
@@ -195,6 +196,7 @@ class RehearsalManager:
                 raise RehearsalError("Choose a new proposal OR a saved performed tuning")
             registry = self.registry()
             try:
+                trajectory = self.admit(plan, registry) if self.admit else None
                 validate_take(plan, registry["keys"],
                               registry.get("path_profiles", ("rest_hub",)))
             except ValueError as exc:
@@ -248,7 +250,8 @@ class RehearsalManager:
                 "attempt_number": number, "max_attempts": MAX_ATTEMPTS,
                 "parent_attempt_id": parent_attempt_id, "source_attempt_id": source_attempt_id,
                 "original_plan": session["baseline_plan"], "tuning_id": tuning_id(plan.model_dump()),
-                "plan": plan.model_dump(), "capability_fingerprint": registry["fingerprint"],
+                "plan": plan.model_dump(), "trajectory": trajectory,
+                "capability_fingerprint": registry["fingerprint"],
                 "consent": {"browser_mic_and_baseten_upload": True, "one_revision_request": True,
                             "supervised_play_and_body_support": True},
                 "index": -1, "completed_notes": 0, "total": len(plan.notes),
@@ -358,7 +361,8 @@ class RehearsalManager:
                     self._finish(attempt, "stopped", attempt.record["error"] or "Stopped before completion")
                 else:
                     attempt.record["playback_outcome"] = "completed"
-                    # Executor has closed/released BODY torque before any network wait.
+                    # Executor has ended motion/disconnected before network wait.
+                    # See webapp.py for the current park/hold vs fault torque policy.
                     self._phase(attempt, "awaiting_audio", timeout=30)
         except Exception as exc:  # noqa: BLE001 - boundary must fail closed on any driver failure
             with self.lock:
@@ -496,14 +500,19 @@ class RehearsalManager:
                                        copy.deepcopy(record["telemetry"]), history=history,
                                        allowed_profiles=attempt.registry.get("path_profiles", ("rest_hub",)),
                                        acoustic_metrics=copy.deepcopy(metrics))
-            except BasetenError:
-                # A rejected/invalid planner reply must not discard the take: the
-                # assessment and measurements are already saved — land on inspect
-                # (no proposed changes) instead of a blank "unavailable".
+            except (BasetenError, ValueError):
+                # Preserve the incoming reply-resilience fix for both provider/
+                # schema errors and local revision rejection. Stop/freshness
+                # still take precedence; no rejected proposal can authorize replay.
                 with self.lock:
-                    self._finish(attempt, "inspect",
-                                 "Planner reply invalid/unavailable; review and measurements "
-                                 "saved, no proposed changes")
+                    if attempt.stop.is_set():
+                        self._finish(attempt, "stopped", record["error"])
+                    elif self.registry()["fingerprint"] != record["capability_fingerprint"]:
+                        self._finish(attempt, "expired", "Keypoints/calibration changed during review; proposal discarded")
+                    else:
+                        self._finish(attempt, "inspect",
+                                     "Planner reply invalid/unavailable; review and measurements "
+                                     "saved, no proposed changes")
                 return
             with self.lock:
                 if attempt.stop.is_set():

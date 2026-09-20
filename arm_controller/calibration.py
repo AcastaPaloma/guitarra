@@ -329,12 +329,17 @@ PAGE = """<!doctype html>
   <section>
     <h2>KEYPOINTS</h2>
     <div class="row">
-      <input type="text" id="kpname" placeholder="pose-r1-c1 &hellip; or rest">
+      <input type="text" id="kpname" placeholder="r1_1, hover-r1-c1, rest">
       <button class="btn primary" id="capture" disabled>CAPTURE</button>
       <button class="btn" id="clear">CLEAR ALL</button>
     </div>
-    <div class="note">grid names fret.py plays: pose-r{fret}-c{string} (string 1 = high E)
-      plus one 'rest'. re-capturing a name replaces it.</div>
+    <div class="note">Primary arm contact names: r{fret}_{string} (or pose-r{fret}-c{string});
+      clearance names: hover-r{fret}-c{string}. String 1 = high E/rightmost, 6 = low E/leftmost.
+      Record an actual lifted pose for each used key, retaining its contact's yaw/roll (IDs 7 and 11).
+      Do not guess a hover by editing coordinates. Endpoint recording alone does not qualify the
+      lift/descent or crossings; see arm_controller/PATHS.md. Any edit invalidates path review.
+      'Go' is manual full-pose recall, NOT a qualified lift-first trajectory—do not use it to slide
+      between contacts. No second-arm connection or calibration is enabled here.</div>
     <table id="kps" style="margin-top:10px"><thead>
       <tr><th>name</th><th>xyz cm</th><th>deg 7..11</th><th></th></tr>
     </thead><tbody></tbody></table>

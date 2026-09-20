@@ -5,11 +5,10 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const terminal = new Set(['review_ready', 'keep', 'inspect', 'unavailable', 'stopped', 'fault', 'expired']);
 const storageKey = 'guitarra.rehearsal.session.v1';
 let config, arrangement = [], arrangementTitle = '', parentId = null, sourceId = null, sessionId = null;
-let pathProfile = 'rest_hub';
+let pathProfile = 'lift_first', pathReady = false, previewVersion = 0;
 let snaRunning = false, snaPoller = null;
-// Best staging family the local registry reports as operator-qualified. The UI
-// only ever picks from config.path_profiles; it cannot invent a path.
-const defaultProfile = () => (config?.path_profiles || []).includes('row_hub') ? 'row_hub' : 'rest_hub';
+// Never silently fall back to the contact-only neutral-hub route.
+const defaultProfile = () => config?.preferred_path_profile || 'lift_first';
 let running = false, cancelled = false, current = null, recorder = null, playSubmitted = false;
 let heartbeatTimer, meterTimer, audioUrl, historyAudioUrl, lastReview, sessionHistory;
 let foreignActive = false, stoppingPromise = null;
@@ -75,12 +74,12 @@ function rememberSession() {
 }
 
 function controls() {
-  const ready = config?.keys.length && config.key_present && config.audio_model_supported;
+  const ready = config?.keys.length && config.key_present && config.audio_model_supported && pathReady;
   $('convert').disabled = running || foreignActive || snaRunning || !config?.keys.length || !config.key_present;
   $('find-tab').disabled = running || foreignActive || snaRunning;
-  $('play-sna').disabled = running || foreignActive || snaRunning;
+  $('play-sna').disabled = running || foreignActive || snaRunning || !config?.extra_pose_playback_enabled;
   $('play').disabled = running || foreignActive || snaRunning || !ready || !arrangement.length;
-  $('confirm-play').disabled = running || !$('media-consent').checked || !$('supervised').checked;
+  $('confirm-play').disabled = running || !pathReady || !$('media-consent').checked || !$('supervised').checked;
   $('stop').disabled = !running && !foreignActive && !snaRunning;
   $('force-stop').disabled = !running && !foreignActive && !snaRunning;
   for (const id of ['prompt', 'take-start', 'take-count', 'media-consent', 'supervised', 'session-select', 'change-song']) {
@@ -133,16 +132,44 @@ function selectTake() {
     : new Set(pauses).size === 1 ? ` · ${pauses[0]}ms pause after each lift`
     : ' · pauses after lift: ' + pauses.join('ms / ') + 'ms';
   $('selected').textContent = (parentId ? 'proposed · ' : '') + pathProfile.replace('_', '-') + pauseText + capped;
+  void previewTrajectory(notes);
+}
+
+async function previewTrajectory(notes) {
+  const version = ++previewVersion;
+  pathReady = false; controls();
+  $('path-status').textContent = 'Checking the whole lift-first route locally…';
+  $('path-trace').textContent = '';
+  try {
+    const result = await api('/api/trajectory', {plan: {notes, path_profile: pathProfile}});
+    if (version !== previewVersion) return;
+    pathReady = result.executable === true;
+    if (!pathReady) {
+      $('path-status').textContent = 'Playback blocked: ' + (result.blockers || []).join(' ');
+      return;
+    }
+    const trace = result.trajectory;
+    $('path-status').textContent = 'Lift → reviewed hover travel → tap → lift. No neutral between notes. ' +
+      `${trace.joint_travel_proxy_counts} counts travel proxy (not time or proof of clearance).`;
+    $('path-trace').textContent = trace.notes.map((note, i) =>
+      `${i + 1}. ${trace.assignments[i].arm} s${note.string}f${note.fret}: ` +
+      note.stages.map(stage => `${stage.stage} ${stage.pose}`).join(' → ')).join('\n') +
+      '\nFinal parking only: ' + trace.exit_route.join(' → ');
+  } catch (error) {
+    if (version === previewVersion) $('path-status').textContent = 'Path check unavailable; no playback. ' + error.message;
+  } finally {
+    if (version === previewVersion) controls();
+  }
 }
 
 function showArrangement(notes, title, profile) {
-  arrangement = notes.map(n => ({string: n.string, fret: n.fret, pause_ms: n.pause_ms ?? 250}));
+  arrangement = notes.map(n => ({arm: n.arm || 'tap_primary', string: n.string, fret: n.fret, pause_ms: n.pause_ms ?? 250}));
   pathProfile = profile || defaultProfile();
   arrangementTitle = title;
   $('title').textContent = title;
   $('notes').replaceChildren(...arrangement.map((n, i) => {
     const node = textNode('div', '', 'note');
-    node.append(textNode('b', `s${n.string}·f${n.fret}`), textNode('span', `${i + 1}. ${pitch(n)}`));
+    node.append(textNode('b', `s${n.string}·f${n.fret}`), textNode('span', `${i + 1}. ${pitch(n)} · ${n.arm}`));
     return node;
   }));
   $('take-start').max = arrangement.length; $('take-start').value = 1;
@@ -186,7 +213,7 @@ $('convert').onclick = async () => {
     const result = await api('/api/plan', request, {timeout: 90000});
     parentId = sourceId = sessionId = null; lastReview = null; sessionHistory = null; rememberSession();
     $('review').hidden = true; $('history-count').textContent = '0';
-    showArrangement(result.notes, result.title);
+    showArrangement(result.notes, result.title, result.path_profile);
     if (result.transcription) {
       const t = result.transcription;
       const shift = t.transpose ? ` · transposed ${t.transpose > 0 ? '+' : ''}${t.transpose} semitones to fit the rig` : '';
@@ -199,7 +226,7 @@ $('convert').onclick = async () => {
 };
 
 function confirmTake() {
-  if (running || foreignActive || !arrangement.length) return;
+  if (running || foreignActive || !arrangement.length || !pathReady) return;
   $('media-consent').checked = false; $('supervised').checked = false;
   $('confirm-description').textContent = parentId ? 'Try the proposed tuning shown below. One take, then review.' :
     sourceId ? 'Continue this session with the saved tuning. Inspect the arm before this new supervised set.' :
@@ -373,7 +400,7 @@ function showReview(record) {
 }
 
 async function runTake() {
-  if (running || !$('media-consent').checked || !$('supervised').checked) return;
+  if (running || !pathReady || !$('media-consent').checked || !$('supervised').checked) return;
   const selected = selection();
   const plan = {notes: selected.notes, path_profile: pathProfile};
   running = true; cancelled = false; current = null; stoppingPromise = null; playSubmitted = false;
@@ -564,10 +591,12 @@ window.addEventListener('pagehide', () => {
   try {
     config = await api('/api/bootstrap');
     $('availability').textContent = !config.keys.length ? 'No current keypoints · calibrate before playing.' :
+      !config.paths_ready ? `${config.keys.length} contact keys · ${config.recorded_hover_count || 0} hover poses. Playback blocked: ${config.path_blocker || 'lift-first paths need review.'}` :
       !config.key_present ? 'Configure Baseten before playing.' : !config.audio_model_supported ? 'Audio evaluator is not configured.' :
-      'Audio endpoint not yet live-verified · supervised takes only.';
+      'Reviewed lift-first routes only · supervised takes · audio endpoint not yet live-verified.';
+    $('arm-status').textContent = 'Primary: its recorded rows 1–5 only. Secondary: planned rows 7–11, strings 1–6 right-to-left; unavailable until calibrated/commissioned. No overlapping arm motion is enabled.';
     $('provider-status').textContent = `Planner: ${config.planner_model}. Audio: ${config.audio_model}. ${config.audio_endpoint_status}. ` +
-      [config.warning, ...(config.keypoint_warnings || [])].filter(Boolean).join(' ');
+      [config.warning, config.path_blocker, ...(config.keypoint_warnings || [])].filter(Boolean).join(' ');
     if (config.active_attempt) {
       current = config.active_attempt; foreignActive = true;
       $('plan').hidden = false;

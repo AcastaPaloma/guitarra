@@ -1,5 +1,12 @@
 # Single-arm web rehearsal: play → listen → review → approve
 
+**Motion update:** [PATHS.md](PATHS.md) owns the active lift-first execution contract.
+The real player no longer admits contact-only rest/row-hub paths. Its 25 current
+contacts have no recorded key hovers or lift-first review, so Play is blocked—not
+silently routed through neutral. Kimi receives arm ownership/reviewed travel costs;
+local code enforces lift → hover travel → tap independently of audio. The planned
+second tap arm owns rows 7–11, strings 1–6 right-to-left, and remains unavailable.
+
 This is the **current single-arm web implementation**, separate from the older
 `guitar/web` fake/two-arm orchestration console. It uses the working tap/fret arm
 (IDs **7–11**). It never commands tool-gripper **12**, activates the retired pluck
@@ -28,10 +35,11 @@ longer sufficient for the audio adapter.
 
 **Two blockers were found in the pulled checkout, not repaired by software tests:**
 
-1. `keyframes_arm2.json` is **empty**. The calibration commit cleared it for
-   re-recording. Record the current rest/keypoints with the operator; no automatic
-   restore from `keyframes_arm2.backup-20260919.json`, old fret maps, interpolation,
-   or XYZ estimates occurs. Planning/playback are blocked without a valid current grid.
+1. The v4 `keyframes_arm2.json` contains **25 contact keys, zero per-key hovers**,
+   and no lift-first qualification. Note planning is possible; motion is not.
+   Record/review a small set of actual contact/hover pairs and directed transit
+   paths with the operator after resolving physical/thermal gates. No backup,
+   old fret map, arbitrary offset, interpolation, or XYZ estimate replaces that review.
 2. The separate Baseten audio adapter targets `thinkingmachines/inkling` by default.
    Its last recorded live probe **timed out**; no successful live listening/guitar
    assessment is established. This integration has not made another paid probe or
@@ -82,8 +90,10 @@ Changed musical ordering/calibration is explicitly not time-compared against the
 ## Operator flow
 
 1. **Convert to notes** makes one billed Kimi planner request using only currently
-   recorded keys. The arrangement can have up to 64 notes. Select a short take of
-   **up to four notes**; long songs are not automatically swept or chunk-replayed.
+   recorded keys and explicit arm ownership. When a reviewed hover graph exists,
+   only its qualified subset and count-travel costs are offered. The arrangement
+   can have up to 64 notes; the take must fit the local execution/capture budget.
+   Long songs are not automatically swept or chunk-replayed.
 2. Review the selected notes/pauses. **Play + Listen / Play Next Take** opens a compact
    confirmation dialog with microphone + Baseten upload/inference consent and physical
    supervision/body support. Both reset each take. Loading the page never asks for a mic.
@@ -92,9 +102,12 @@ Changed musical ordering/calibration is explicitly not time-compared against the
    empty, interrupted, or unsupported capture does not silently fall back to
    unrecorded execution. The API's capture-ready fields are browser attestations,
    not independent proof of the source device.
-4. The existing `rest → tap → rest` stages execute locally at the unchanged speeds
-   and contact dwell. There is no per-note model request. The browser records through
-   completion and a 350ms ringing tail, then closes **all** microphone tracks/context.
+4. Whole-phrase lift-first admission runs before reservation/recording and again
+   before connection. `tap A → hover A → reviewed hover route → hover B → tap B`
+   executes locally at unchanged speeds/contact dwell; every lift must finish before
+   travel. Global rest is only entry/final exit, never a between-note fallback.
+   There is no per-note model request. Recording continues through completion and
+   a 350ms ringing tail, then closes **all** microphone tracks/context.
 5. After normal disconnect, upload this attempt's mono PCM16 WAV to the local server.
    The existing adapter validates/resamples it to 16kHz and makes **one** consented
    Baseten audio request. No WAV/base64 is passed to Kimi or included in JSON logs.
@@ -121,8 +134,8 @@ remain in the session and bounded planner context; there is no unattended budget
 |---|---|
 | Timing | Change up to three post-lift pauses, by at most **100ms** each, on a **50ms** grid in 0–2000ms. The last, unused pause cannot be “optimized.” |
 | Ordering | Swap one adjacent pair of existing events. The UI warns that this changes the musical arrangement; it is not a path-only optimization. No note insertion/deletion/duplication. |
-| Positioning | Select one other **currently recorded key of identical pitch**. No joint/XYZ offsets, inverse kinematics, contact-depth changes, or new poses. The current 18-key fret-1–3 set has no alternate same-pitch locations, so this normally offers no positioning change. |
-| Paths | Switch `path_profile` between **named, operator-qualified profiles only** (see below). `rest_hub` always exists; `row_hub` appears only after the operator runs `fret.py --qualify-row-hubs` and confirms. Direct A→B/hover shortcuts, waypoints, or any other invented path are **rejected**, not silently clamped or interpreted. |
+| Positioning | Select one other **recorded same-pitch key owned by the same enabled arm**. No joint/XYZ offsets, IK, contact-depth changes, new poses, or transfer to an unavailable arm. The result still needs full path admission. |
+| Paths | Only locally admitted `lift_first` is executable now. The compiler minimizes reviewed hover travel, never global-neutral detours between notes. `rest_hub`/`row_hub` remain historical schema values, not current execution authority. Invented waypoints, unreviewed edges and missing hovers are **rejected**. |
 
 Only **one category per attempt** can change. The model cannot change speed,
 acceleration, dwell, gripper state/torque, protection, limits, calibration, the
@@ -135,31 +148,20 @@ and encoder readiness, not verified contact or the moment sound began. The evalu
 is told that exact intended attack times are unspecified. This is not a demonstration
 of millisecond timing correction, nor a guarantee of improvement.
 
-### Path profiles: `rest_hub` and the qualified `row_hub`
+### Lift-first paths, not hub-only motion
 
-`rest_hub` routes every tap press → global rest → press. `row_hub` stages via the
-operator-recorded per-fret-row lifted hubs (`rest-r{N}` keyframes): lift to the
-current row's hub, cross hubs only on a row change, press — much shorter travels
-within a row. Both are fixed staging families executed by local code
-(`fret.py`); a model can only *select* one from `allowed_path_profiles`, never
-supply waypoints, joints, XYZ, or speeds.
+The earlier rest/row-hub family moved lift and lateral joints together. It could
+not enforce the required lift-before-travel ordering. That code path and its
+qualification sweep are retired. The real executor accepts only recorded/reviewed
+contact↔hover pairs and directed hover crossings, with whole-phrase preflight and
+arrival/fault gates. Models receive named capabilities, not authority to invent
+paths. `POST /api/trajectory` previews every named stage without devices/inference.
 
-`row_hub` becomes selectable ONLY through a human-in-the-loop qualification:
-the operator runs `fret.py --qualify-row-hubs` (a slow supervised walk of every
-hub, every press/lift in each row, and every hub-to-hub crossing), watches for
-scrapes/interference, and types QUALIFIED at the local terminal. That records
-the decision in `calibration_arm2.json` **bound to the sha256 of the exact
-keyframe bytes** — any keypoint edit silently un-qualifies it. The web console
-and the browser cannot set or forge this flag; the registry re-derives it from
-disk on every read and the capability fingerprint covers it, so a mid-session
-change expires outstanding proposals. Neither profile is presented as an
-unconditional collision-free guarantee.
-
-Hover/direct A→B shortcuts still do not exist: the derived XYZ layer has
-unverified joint signs/offsets, and no audio explanation, endpoint pose, or
-interpolation can certify swept clearance. Any future hover library needs its
-own recorded transitions and a separate operator qualification of this same
-shape before local code may name it as a profile.
+See [PATHS.md](PATHS.md) for recording names, review fingerprints, the no-neutral
+shortest-path compiler, CLI preview, and minimal two-key qualification. No existing
+poses or approval records were fabricated. Current hovers are absent, so playback
+is blocked even though note planning is available. Encoder readiness/endpoint
+coordinates/audio cannot establish swept clearance or resolve the thermal gates.
 
 ## Capture, ownership, budgets, and failure behavior
 
@@ -167,10 +169,11 @@ shape before local code may name it as a profile.
   suppression are *requested* off (browser/device support can vary). No speaker
   monitoring, camera input, server microphone, MediaRecorder WebM dependency, or
   ffmpeg process. The browser handles late permission grants by closing their tracks.
-- Capture is bounded to **60s**. Four notes reserve three four-second encoder-stage
-  timeouts per note, the existing 120ms dwell, and bounded post-lift pauses within
-  a **55s** software execution budget. These are safety/time limits, not measured
-  mechanics or a qualified thermal hold duration.
+- Current pulled limits are **160s capture**, **150s local execution**, up to 64
+  notes subject to the duration estimate, and four-second encoder-stage timeouts.
+  These limits were not increased by the lift-first fix. They are software bounds,
+  not measured mechanics or permission for long/unattended holds. Compiled route
+  travel is a count proxy, not a new physical timing measurement.
 - Each reservation has a unique attempt ID and capture ID. The server accepts a
   single matching WAV only after **completed** playback, checks sample counts/rate,
   sample-frame markers, duration/coverage, and upload size. Frame continuity/input
@@ -188,10 +191,12 @@ shape before local code may name it as a profile.
 - Failed encoder arrival now **raises**, instead of returning an ignored `False`
   and continuing into the next press. Faults/uncertain state cause no automatic
   rest/recovery move, audio compensation, or replay.
-- **Web playback now disconnects with body-joint torque OFF**, before waiting for
-  any model. **Support the body.** The old web implementation left it powered.
-  Motor 12 is never commanded; no all-motors torque-off, grip opening, or grip
-  reassertion is introduced. The standalone `fret.py` CLI default is unchanged.
+- The pulled web player's clean/cooperative-stop path parks once via a reviewed
+  final exit and **holds body torque**; force stop holds frozen goals. Faults release
+  body torque without recovery motion (**support the body**). Failed exit is now a
+  fault, not a successful take. These existing hold semantics remain unqualified for
+  sustained thermal use. Motor 12 is never commanded: no all-motors torque-off, grip
+  opening, or grip reassertion. The standalone close default is unchanged.
 - During network inference, Stop discards late results and blocks further requests
   or dispatch. It cannot cancel an already-billed provider request. No automatic
   provider/model retry/fallback. Default audio timeout is 30s; text revision uses

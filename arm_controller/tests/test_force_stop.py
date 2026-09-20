@@ -5,10 +5,8 @@ import fret
 import pytest
 import webapp
 from tap_plans import Note, TapPlan
+from path_fixtures import path_registry
 from test_tap_web import client  # noqa: F401 - pytest fixture
-
-PROFILES = ("rest_hub",)
-
 
 def test_force_stop_requires_an_executing_take(client):  # noqa: F811
     response = client.post("/api/force-stop", json={})
@@ -61,16 +59,19 @@ class FakeArm:
             raise fret.Halted("force stop: arm frozen mid-path, torque held")
         return {"status": "command_completed"}
 
-    def rest(self):
+    def rest(self, *, deadline=None):
+        assert webapp._active_halt["event"] is self.halt
         self.calls.append(("rest",))
+        if self.mode == "halted_exit":
+            self.halt.set()
+            raise fret.Halted("fixture: force stop during final exit")
 
     def close(self, torque_off=False):
         self.calls.append(("close", torque_off))
 
 
 def _run(monkeypatch, mode):
-    registry = {"keys": {(1, 1)}, "grid": None, "row_rests": {},
-                "path_profiles": PROFILES, "fingerprint": "fp"}
+    registry = path_registry(keys=((1, 1),))
     monkeypatch.setattr(webapp, "read_registry", lambda: registry)
     arms = []
 
@@ -80,7 +81,7 @@ def _run(monkeypatch, mode):
         return arm
 
     monkeypatch.setattr(fret, "FretArm", fake_arm)
-    plan = TapPlan(notes=[Note(string=1, fret=1)])
+    plan = TapPlan(notes=[Note(string=1, fret=1)], path_profile="lift_first")
     try:
         completed = webapp.execute_take(plan, registry, threading.Event(), lambda event: None)
     except (TimeoutError, fret.Halted):
@@ -106,3 +107,10 @@ def test_force_stop_holds_torque_and_never_moves_again(monkeypatch):
     completed, arm = _run(monkeypatch, "halted")
     assert completed is None
     assert arm.calls == [("tap", 1, 1), ("close", False)]
+
+
+def test_force_stop_stays_registered_through_final_exit(monkeypatch):
+    completed, arm = _run(monkeypatch, "halted_exit")
+    assert completed is None
+    assert arm.calls == [("tap", 1, 1), ("rest",), ("close", False)]
+    assert webapp._active_halt["event"] is None

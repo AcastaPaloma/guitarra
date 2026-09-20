@@ -6,7 +6,85 @@ The pulled single-arm tap web app is now the active web milestone; it is **not**
 older fake/two-arm console. Camera remains off. No deployment, training, real motion,
 real microphone, or live inference was exercised by the new implementation checks.
 
-## 0. Active single-arm web rehearsal (2026-09-19)
+## Current motion correction: lift-first tap routes + explicit arm ownership
+
+This update applies to **`arm_controller/` on 8788**, not the old fake console on
+8787. Earlier prompt-only changes under `guitar/orchestration/` did not affect this
+player. The actual cause was a fixed `rest → tap → rest` cycle with all body goals
+sent together: its named “lift” did not enforce clearance before lateral movement.
+
+- [`tap_paths.py`](../arm_controller/tap_paths.py) now compiles the whole phrase
+  through reviewed contact/hover pairs and directed hover crossings. The executor
+  waits for the current key's own lift, then takes the minimum joint-count-travel
+  reviewed route and lowers/taps. No global rest between notes, contact-to-contact
+  shortcut, guessed hover, or fall-back-to-neutral route. Repeated keys still tap/lift.
+- Missing/stale paths reject **before reservation/mic/serial access**. Unknown start
+  pose, drift and lift timeouts prevent continuing; motion faults latch. Final parking
+  uses reviewed exit edges, respects the deadline, remains Force-Stop-addressable,
+  and a failed exit is no longer hidden as a successful take.
+- Current source map is **not empty**: 25 v4 contacts (rows 1–4 × six strings plus
+  `r5_1`), `rest`, and `neutral`. It has **zero key hovers** and **no lift-first review**.
+  Playback is deliberately blocked until an operator-reviewed small subset exists.
+  No calibration/poses, grip settings, speed, acceleration or contact dwell were changed.
+  Old rest/row profiles remain readable in history but no longer authorize real taps;
+  extra-pose/SNA playback and the old row-hub sweep cannot bypass this rule.
+- Kimi's arrangement contract now includes explicit `arm` ownership and available
+  reviewed transition costs, with lift-first/minimal-travel priority. The primary
+  native tool schemas also require an owner and reject wrong-arm/raw-target arguments;
+  global parking and sustained holds are not model-callable choices between notes.
+  The local compiler, not prompt compliance or an audio model, decides the final route.
+  The UI previews named stages with `/api/trajectory`; no media/model/device access.
+- [`tap_arms.py`](../arm_controller/tap_arms.py) reserves `tap_primary` for its recorded
+  rows 1–5 and **future `tap_secondary` for rows 7–11, strings 1–6 right-to-left**.
+  The latter is explicitly unavailable: no guessed port/IDs, poses, connection, or
+  executor. Cross-owner/unrecorded/disabled assignments fail locally. A device-free
+  future dual-owner schedule serializes the shared guitar workspace; **not** a live
+  two-arm executor or permission for overlapping motion.
+- The pulled player's normal final park/body-torque-hold vs fault/body-torque-off
+  policy remains (force stop holds frozen goals). Motor 12 is never commanded.
+  This is not an independent thermal monitor or hardware E-stop; historical thermal
+  and sustained-holding gates still apply. No physical playing/clearance was verified.
+
+Details and the minimal two-key recording/review follow-up: [PATHS.md](../arm_controller/PATHS.md).
+Tests use artificial poses and a fake serial bus through the actual `FretArm` methods.
+The original combined working-tree run reported 274 passes, six expected failures
+from separate uncommitted DSP checks, and two pre-existing audio test-fixture failures.
+The merge update below validates the exact scoped commit independently of that work.
+Three Node capture checks and seven fully mocked browser cases passed, including
+missing-path rejection before microphone/Play, successive takes, cancellation, and
+mobile layout. Optional Playwright was reused from `/tmp/guitarra-browser-check`
+without altering the robot environment. Private evidence:
+`guitar/runs/lift-first-browser-check.json` (synthetic, not audio/hardware evidence).
+The idle tap server was restarted on **8788**, after checking no active take/riff,
+serial device, or external request. Bootstrap confirms 25 contacts, zero hovers,
+no admitted path profile, and the secondary arm unavailable. A local trajectory
+preview rejects missing clearance without reserving/playing a take. **Reload the page**
+for its new session token. Other servers on 8787/8765 were left alone.
+No live model request, real microphone/camera, hardware motion, deployment or training
+was made for this motion change. Commit/push was subsequently requested by the operator.
+Separate audio/provider and legacy-console edits are preserved locally, not bundled
+into the motion/merge commit.
+
+### Merge integration (2026-09-20)
+
+Integrated upstream `3322eba` with the lift-first/arm-owner work. The overlapping
+planner example retains explicit ownership and `lift_first`, while keeping the
+incoming 2,000-character rationale limit and unavailable-key guardrails. Invalid
+provider/schema/local proposals preserve the recorded review and finish `inspect`;
+Stop or a changed calibration still wins (`stopped`/`expired`), with no replay.
+The two older evaluator fixtures were aligned with the already-existing WAV duration
+limit and required assessment fields; no runtime audio behavior changed here.
+Merge verification: **276 Python checks passed** against an isolated export of the
+exact scoped motion/merge commit, excluding concurrent audio/provider development.
+Node capture checks and the mocked browser flow also passed; no device/media/provider
+access or physical qualification was performed. The merged app is served on 8788;
+Play remains gated by missing recorded/reviewed hover paths.
+
+## 0. Original single-arm web rehearsal snapshot (2026-09-19; historical)
+
+**The current motion/keypoint/ownership facts above supersede this earlier snapshot.**
+Its four-note budgets, empty key file and rest-hub-only route described the original
+implementation, not the current player. Audio-specific development remains separate.
 
 Source: [`../arm_controller/webapp.py`](../arm_controller/webapp.py),
 [`rehearsal.py`](../arm_controller/rehearsal.py), [`tap_plans.py`](../arm_controller/tap_plans.py),

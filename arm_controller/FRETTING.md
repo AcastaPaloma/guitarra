@@ -1,86 +1,74 @@
-# Tapping/fretting tools — v2 grid mapping and safety contract
+# Tapping/fretting — v4 recorded keys, lift-first execution
 
-**SINGLE-ARM RIG (2026-09-19): the pluck arm is out of service.** `fret.py`
-is the COMPLETE tool surface for the whole rig — the arm sounds notes by
-tapping the recorded keys (fast press, brief dwell, lift). `pluck.py` is
-retired; do not wire its tools anywhere.
+**Current working arm:** body IDs **7–11**, tool gripper **12 never commanded**.
+The arm sounds notes by tapping; there is no separate functioning pick arm.
+`pluck.py` is retired. The current web app is `webapp.py` on **8788**, not the older
+fake `guitar/web` console on 8787. [PATHS.md](PATHS.md) owns the current path contract;
+[AGENTS.md](../AGENTS.md) owns operator/gripper requirements.
 
-`fret.py` drives the working arm (IDs 7–11 + gripper 12 on `FRET_PORT`,
-currently `/dev/cu.wchusbserial5B8E1128501` — the port re-enumerates on
-replug, check `ls /dev/cu.*`).
-Backend-agnostic: `TOOLS` holds the schemas, `dispatch()` is the entry point,
-no Baseten wiring yet by design.
+## Current mapping
 
-## v2 mapping (2026-09-19) — supersedes the old fret map
+`keyframes_arm2.json` is the source of truth in **raw servo counts**, without
+unit conversion or inferred IK positions. The rig was repositioned and re-recorded:
 
-The operator re-recorded keypoints because the old 110-pose map
-(`guitar/robot/poses/fret_arm.json`) proved **inaccurate — do not fall back to
-it or to the fretmap interpolation pipeline while this section stands.**
+- Contact names: `r{fret}_{string}` or `pose-r{fret}-c{string}`.
+- String **1 = high E/rightmost**, … **6 = low E/leftmost**.
+- Current contacts: rows 1–4 across all six strings, plus `r5_1` (**25 keys**).
+- `rest` is the recorded entry/final-park pose, not a between-note waypoint.
+- Per-key clearance names: `hover-r{fret}-c{string}`. **None are recorded yet.**
+- `neutral` and old `rest-r{row}` hubs do not establish per-key lift clearance.
+- No current kinematic reference is present. Old XYZ estimates, the v2/v3 backups,
+  and `guitar/robot/poses/fret_arm.json` cannot substitute for this map.
 
-- Source of truth: `keyframes_arm2.json`, recorded with the keyframe GUI in
-  **raw servo counts** (no unit conversion anywhere in v2).
-- One keypoint per cell, named `pose-r{R}-c{C}`:
-  - `r` = fret row, **only frets 1–3 are supported for now** (r4 was partially
-    recorded and is deliberately skipped by the loader).
-  - `c` = string, same convention as plucking: **1 = high E (rightmost) …
-    6 = low E (leftmost)**, open notes E4 B3 G3 D3 A2 E2.
-- `rest` is the recorded safe park pose and the transit hub.
-- Loader quirks handled explicitly (see `--list` warnings): a duplicate
-  `pose-r3-c5` (first recording wins — the second looked like a different
-  spot) and out-of-range names are skipped with warnings, never silently.
-- **Known gap: (string 6, fret 3) has no keypoint.** The skipped `pose-c3-r6`
-  entry may be it, mislabeled/transposed — its shoulder_pan fits the r3 row
-  trend. Operator to confirm and rename it `pose-r3-c6` (GUI Edit dialog),
-  or re-record the cell.
+## Motion contract and current block
 
-## ⚠ Safety / interference — v2 contract
+The former `rest → tap → rest` path could command sideways motion while the tip
+was still near the strings. It has been retired, not merely discouraged in a prompt.
 
-The v2 grid has no above/touch pairs, so there is **no hover surface** to
-translate along. Until hover keypoints exist, **every transition routes
-through `rest`**: press → rest → press. This preserves the existing route;
-it is **not an unconditional collision-free guarantee**. Full swept-arm/tool
-clearance still requires operator qualification. If transit speed becomes a
-problem, record per-cell hover keypoints AND qualify the LIFT→TRANSLATE→PRESS
-transitions before offering them as local named profiles. Audio or estimated
-XYZ cannot certify those paths. Historical staging code is reference only.
+The new sequence is **current key → own hover → awaited arrival → shortest reviewed
+hover route → destination hover → tap → own hover**. Lifts/descents retain the key's
+yaw/roll goals. The whole phrase and its exits are admitted locally before connection.
+Missing/stale hover pairs, unreviewed crossings, unknown starting state, drift or
+failed arrival cannot cause automatic neutral fallback, replays or recovery moves.
 
-**The gripper (ID 12) is never commanded — not position, not torque.** It
-permanently holds the fingertip tool. **AGENTS.md overrides older settings:**
-the last operator-selected live limit is **110**, after a reported 75°C event;
-180 is the unresolved legacy plugin default, not a setting to restore. This
-raw-serial path neither sets nor reasserts grip. `MOTOR_IDS` in `fret.py` does
-not contain 12. No sustained thermal qualification is claimed.
+This needs **actual recorded/reviewed paths**; endpoint coordinates and encoder
+arrival are not proof of string clearance. Current playback is therefore blocked
+until a small operator-reviewed subset exists. [PATHS.md](PATHS.md) describes that
+process and its read-only preview/template commands. No full-key sweep is needed.
+Existing speeds, acceleration and contact dwell are unchanged. No model can change
+grip settings, calibration, motor targets, or clearance. Fine-tuning/audio is not a
+prerequisite for this deterministic path improvement.
 
-## Press depth
+## Tools and cleanup
 
-v2 keypoints were recorded already pressed — there is no press_mm parameter
-anymore. If a note buzzes, re-record that cell pressed slightly deeper via
-the GUI (jog arrows on wrist/elbow), don't add offsets in code.
+- `tap_key(string, fret)`: local reviewed approach, tap, own-hover lift. No neutral.
+- `tap_sequence(keys, gap_s)`: validates the whole phrase before its first tap.
+- `hold_fret`: local/operator-only quiet hold via a reviewed hover; not model-callable.
+- `release_fret`: lift to that key's own hover; **never opens the gripper**.
+- `rest()` / CLI `--rest`: local/operator-only reviewed final exit. Global parking is
+  no longer in the model's tool allowlist; it cannot request neutral between notes.
+- Every model-callable tool requires `arm: "tap_primary"`; unknown fields, another
+  owner, or primary tasks outside its rows are refused instead of silently rerouted.
+- `get_fret_position` / `estimate_position`: read-only views. Estimates are not targets.
+- Contact-only extra/SNA poses and the old row-hub qualification sweep cannot bypass
+  the new path contract; they remain blocked.
 
-## Sustained-hold caveat (operator history)
+Web completion/cooperative stop follows a reviewed final exit and holds body torque
+at rest, as in the pulled player. Faults add no recovery move and release body torque;
+force stop holds frozen goals. A failed exit is a fault, not successful completion.
+These controls are **not** a hardware E-stop or an independent thermal monitor.
 
-Holds are continuous stall loads. The same overload protection that froze the
-pluck arm's elbow (torque clamps to ~20% after a ~2 s stall past the trigger)
-exists on these servos: if a press goes weak mid-hold, lift, cool, re-press.
-Keep long holds bounded and watch temps (reg 63) during long passages.
+**Gripper 12 is never commanded—not position or torque.** The last operator-selected
+limit is **110**, after a reported **75°C** event. Neither 110 nor a short temperature
+check establishes sustained qualification. Never restore the legacy 180 default,
+raise torque to fix contact, or defeat thermal protection. Support the body/tool as
+required by AGENTS.md; no unattended rehearsal or physical qualification sweep.
 
-## Web rehearsal changes
+## Pending second tap arm
 
-[REHEARSAL.md](REHEARSAL.md) describes the supervised browser-mic → Baseten
-assessment → reviewed proposal integration. Speeds, dwell, and rest-hub
-routing are unchanged. Encoder-arrival timeout now **raises** instead of
-being ignored; a failed stage cannot continue into another press. The web
-executor releases **body torque only** on disconnect and adds no recovery
-homing—support the arm. The standalone CLI's close default is unchanged.
-There are no qualified direct A→B/hover shortcuts or automatic physical repeats.
-
-## Tools
-
-- `tap_key(string, fret)` — fast press to SOUND the note, dwell, lift. The
-  only sound-making primitive on the rig now.
-- `tap_sequence(keys, gap_s)` — tap several `[string, fret]` keys in order.
-- `hold_fret(string, fret)` — quiet press and HOLD until released/re-targeted.
-- `release_fret()` — back to rest.
-- `get_fret_position(string, fret)` — exact raw targets + recorded cell list,
-  no motion, works without hardware.
-- `fret_rest()` — park.
+The operator's returning arm owns **rows 7–11**, strings **1–6 right-to-left**.
+`tap_arms.py` and the symbolic note schema distinguish `tap_primary` and
+`tap_secondary`. The second remains unavailable until its own recorded keys/hover
+paths, physical mapping and execution are commissioned. No old pick-arm IDs or
+poses are reused. Models cannot assign keys to the wrong owner or authorize
+simultaneous motion; the shared-guitar ownership contract is sequential initially.

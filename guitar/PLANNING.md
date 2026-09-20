@@ -1,5 +1,15 @@
 # Guitar motion planning — direct transitions, telemetry-first timing
 
+**Active tap-web source correction:** the current single-arm player is
+`arm_controller/fret.py`, NOT the legacy `robot/arm.py` discussed below. It previously
+forced `rest → tap → rest` and moved lift/lateral joints together. The new
+[lift-first compiler/executor](../arm_controller/PATHS.md) admits only reviewed
+per-key contact/hover pairs and directed hover paths; no neutral between notes and
+no unreviewed fallback. The current 25 contact keys have no hovers, so real playback
+is blocked until operator review. Future `tap_secondary` owns rows 7–11, strings 1–6,
+but is not enabled. The earlier two-role controller analysis below remains reference
+material, not evidence that the current raw-count tap arm already had clearance routing.
+
 **Status: motion/timing requirements, not a completed phrase executor.** The active
 [DESIGN.md](DESIGN.md) is same-arm guitar rehearsal with pretrained models; current code
 and gaps are in [STATUS.md](STATUS.md). No replacement hardware, simulated performers,

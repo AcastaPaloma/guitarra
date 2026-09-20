@@ -1,5 +1,5 @@
-"""Riff button: consent + ownership gating, and the end-of-motion contract."""
-import time
+"""The extra-pose riff cannot bypass the current lift-first requirement."""
+from unittest.mock import Mock
 
 import fret
 import webapp
@@ -21,7 +21,7 @@ def test_riff_requires_explicit_consent(client):  # noqa: F811
 def test_riff_refuses_without_recorded_poses(client, monkeypatch):  # noqa: F811
     monkeypatch.setattr(fret, "load_map", lambda **kwargs: {"extras": {}})
     response = client.post("/api/play-sna", json={"supervised_and_supported": True})
-    assert response.status_code == 409 and "poses" in response.json()["detail"]
+    assert response.status_code == 409 and "lift/hover paths" in response.json()["detail"]
 
 
 def test_riff_blocks_takes_and_takes_block_riff(client, monkeypatch):  # noqa: F811
@@ -35,38 +35,12 @@ def test_riff_blocks_takes_and_takes_block_riff(client, monkeypatch):  # noqa: F
         webapp._sna["running"] = False
 
 
-class FakeArm:
-    def __init__(self, **kwargs):
-        self.calls = []
-
-    def tap_pose(self, name, **_kwargs):
-        self.calls.append(("tap", name))
-        return {"status": "command_completed", "pose": name}
-
-    def rest(self):
-        self.calls.append(("rest",))
-
-    def close(self, torque_off=False):
-        self.calls.append(("close", torque_off))
-
-
-def test_riff_plays_all_taps_then_parks_and_holds(client, monkeypatch):  # noqa: F811
+def test_recorded_extra_contacts_alone_do_not_allow_riff_motion(client, monkeypatch):  # noqa: F811
     monkeypatch.setattr(fret, "load_map", all_extras)
-    monkeypatch.setattr(fret, "SNA_RIFF", [("7", 0), ("10", 0)])
-    arms = []
-
-    def fake_arm(**kwargs):
-        arm = FakeArm(**kwargs)
-        arms.append(arm)
-        return arm
-
-    monkeypatch.setattr(fret, "FretArm", fake_arm)
+    factory = Mock(side_effect=AssertionError("contact-only riff must not connect"))
+    monkeypatch.setattr(fret, "FretArm", factory)
     response = client.post("/api/play-sna", json={"supervised_and_supported": True})
-    assert response.status_code == 200 and response.json()["total"] == 2
-    deadline = time.monotonic() + 5
-    while webapp.sna_running() and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert not webapp.sna_running()
-    assert arms[0].calls == [("tap", "7"), ("tap", "10"), ("rest",), ("close", False)]
+    assert response.status_code == 409 and "no rest-hub fallback" in response.json()["detail"]
+    factory.assert_not_called()
     status = client.get("/api/status").json()["sna"]
     assert status["running"] is False and status["error"] is None

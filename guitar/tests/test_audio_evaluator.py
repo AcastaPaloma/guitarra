@@ -29,6 +29,7 @@ def response():
         "recording_quality": "unusable", "notes_match": "not_assessed", "timing_match": "not_assessed",
         "summary": "Insufficient acoustic evidence.", "observations": [],
         "limitations": ["This is an offline mocked response, not a model hearing the guitar."],
+        "score": 0, "suggestions": ["Check capture quality before judging any notes."],
     }
     return {"choices": [{"finish_reason": "stop", "message": {
         "role": "assistant", "content": json.dumps(assessment)}}],
@@ -53,7 +54,7 @@ def test_normalization_and_provenance(tmp_path, rate, channels):
     assert 'wav_bytes=' not in repr(clip)
 
 
-@pytest.mark.parametrize("options", [{"width": 1}, {"seconds": 0}, {"seconds": 61}, {"rate": 12345}])
+@pytest.mark.parametrize("options", [{"width": 1}, {"seconds": 0}, {"seconds": audio.MAX_SECONDS + 1}, {"rate": 12345}])
 def test_invalid_audio_is_rejected_locally(tmp_path, options):
     with pytest.raises(ValueError):
         audio.prepare_clip(wav_file(tmp_path, **options))

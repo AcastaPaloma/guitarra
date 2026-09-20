@@ -13,6 +13,15 @@ pretrained assessment → bounded proposed revision for that subset. Two-arm sch
 below remains a broader target, not a claim about the current tap UI. Status/physical
 and endpoint verification boundaries are in [STATUS.md](STATUS.md).
 
+**Latest motion requirement:** lift the current key before lateral travel, minimize
+travel over reviewed hover paths, then lower/tap the next key; no global neutral between
+notes. The real implementation is [arm_controller/PATHS.md](../arm_controller/PATHS.md),
+not the older fake console's fret/pick tools. The operator's planned second **tap** arm
+owns rows **7–11**, strings **1–6 right-to-left**, independently of the primary arm's
+recorded rows 1–5. It stays unavailable until its own mapping, poses, paths, protection,
+and connection are commissioned. Models cannot borrow another arm's keys or authorize
+overlap; shared-guitar operations stay sequential until overlap is separately qualified.
+
 ## 1. The product
 
 Use the **same physical two-arm guitar rig** with defined, qualified fret/press, release,

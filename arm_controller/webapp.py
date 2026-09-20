@@ -32,6 +32,8 @@ sys.path.insert(0, str(HERE.parent / "guitar"))
 import calibration
 import fret
 import songsterr
+from tap_arms import PRIMARY, assign, capabilities as arm_capabilities
+from tap_paths import PROFILE, ClearancePaths, PathUnavailable, motion_contract
 from model.audio import AUDIO_MODELS, DEFAULT_AUDIO_MODEL
 from model.baseten import DEFAULT_MODEL, BasetenError, load_env
 from rehearsal import (
@@ -81,25 +83,40 @@ def read_registry():
         grid = (cells, rest, warnings)
         if not cells or set(rest) != set(fret.MOTOR_IDS):
             raise ValueError("Record a rest pose and the needed keys first")
-        # row_hub is executable only when the OPERATOR qualified it against these
-        # exact keyframe bytes (fret.py --qualify-row-hubs) and every recorded
-        # row still has its hub. Any keypoint edit invalidates it automatically.
-        row_rests = snapshot["row_rests"]
-        profiles = ["rest_hub"]
-        row_hub = json.loads(calibration_bytes).get("qualified_profiles", {}).get("row_hub", {})
-        if (isinstance(row_hub, dict)
-                and row_hub.get("keyframes_sha256") == hashlib.sha256(raw).hexdigest()
-                and row_rests and {f for _, f in cells} <= set(row_rests)):
-            profiles.append("row_hub")
-        signature = (b"rest_hub-v2:400:1200:0.12:30:90:4.0:profiles="
-                     + ",".join(sorted(profiles)).encode())
-        fingerprint = hashlib.sha256(raw + b"\0" + calibration_bytes + signature).hexdigest()
-        return {"keys": set(cells), "grid": grid, "row_rests": row_rests,
-                "path_profiles": tuple(profiles), "fingerprint": fingerprint,
+        # Contacts alone (or a global/per-row hub) cannot enforce lift-first.
+        # Keep them available for note planning, but NEVER silently execute the
+        # old press -> rest -> press route when hover/review data is absent.
+        paths, blocker = None, None
+        try:
+            paths = ClearancePaths.from_snapshot(snapshot, hashlib.sha256(raw).hexdigest(),
+                                                 json.loads(calibration_bytes))
+        except PathUnavailable as exc:
+            blocker = str(exc)
+        owners = json.dumps(arm_capabilities(set(cells), primary_ready=paths is not None), sort_keys=True).encode()
+        fingerprint = hashlib.sha256(raw + b"\0" + calibration_bytes + motion_contract().encode() + owners).hexdigest()
+        return {"keys": set(cells), "grid": grid, "row_rests": snapshot["row_rests"],
+                "hovers": snapshot["hovers"], "paths": paths, "path_blocker": blocker,
+                "path_profiles": (PROFILE,) if paths else (), "fingerprint": fingerprint,
                 "warnings": warnings}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         raise RehearsalError("No valid current keypoint grid/rest pose. Calibrate first; "
                              "the backup/old fret map is not used automatically.") from None
+
+
+def admit_motion(plan, registry):
+    """Whole-phrase path/arm admission BEFORE reserving a take or opening a port."""
+    try:
+        assignments = assign(plan.notes, {PRIMARY: registry["keys"]})
+        if plan.path_profile != PROFILE:
+            raise PathUnavailable("Hub-only playback is retired: rebuild with lift_first; "
+                                  "rest/row hubs do not guarantee lift before sideways motion")
+        if registry.get("paths") is None:
+            raise PathUnavailable(registry.get("path_blocker") or "No reviewed lift-first paths")
+        compiled = registry["paths"].compile((n.string, n.fret) for n in plan.notes)
+        compiled["assignments"] = assignments
+        return compiled
+    except ValueError as exc:
+        raise RehearsalError(str(exc)) from None
 
 
 # Force stop: the executor publishes its halt event here so /api/force-stop can
@@ -114,24 +131,27 @@ def execute_take(plan, registry, stop_event, emit):
         return False
     if read_registry()["fingerprint"] != registry["fingerprint"]:
         raise RehearsalError("Calibration changed before connection")
-    if plan.path_profile not in registry.get("path_profiles", ("rest_hub",)):
-        raise RehearsalError("Plan's path profile is no longer qualified on this rig")
+    compiled = admit_motion(plan, registry)
+    if stop_event.is_set():
+        return False
+    emit({"event": "trajectory_admitted", "trajectory": compiled})
     deadline = time.monotonic() + MAX_PLAY_SECONDS
     halt = threading.Event()
-    arm = fret.FretArm(grid=registry["grid"],
-                       row_rests=registry["row_rests"] if plan.path_profile == "row_hub" else None,
+    arm = fret.FretArm(grid=registry["grid"], paths=registry["paths"],
                        path_profile=plan.path_profile, halt=halt)
     with _halt_lock:
         _active_halt["event"] = halt
 
     def run_notes():
-        # Every exit from this loop leaves the arm settled at a staging hub.
+        # Each successful tap finishes at that key's OWN hover. A fault can
+        # leave state uncertain; no cleanup route is then attempted.
         for index, note in enumerate(plan.notes):
             if stop_event.is_set():
                 return False
-            emit({"event": "note_start", "index": index, "string": note.string, "fret": note.fret})
+            emit({"event": "note_start", "index": index, "arm": note.arm,
+                  "string": note.string, "fret": note.fret, "shared_workspace": "guitar"})
             result = arm.tap_key(note.string, note.fret, deadline=deadline)
-            emit({"event": "note_end", "index": index, "result": result})
+            emit({"event": "note_end", "index": index, "arm": note.arm, "result": result})
             if index < len(plan.notes) - 1 and stop_event.wait(note.pause_ms / 1000):
                 return False
         return not stop_event.is_set()
@@ -142,23 +162,26 @@ def execute_take(plan, registry, stop_event, emit):
         clean = True
         return completed
     finally:
-        with _halt_lock:
-            _active_halt["event"] = None
-        # Completed/stopped takes PARK at the recorded global rest and then HOLD
-        # torque there, so the arm never slumps or drops onto the guitar after
-        # finishing (release torque later from /calibrate, supporting the body).
-        # On a FAULT: no recovery motion and body torque off (a stalled servo
-        # must not keep driving into whatever blocked it) — the operator
-        # supports the body, as before. On a FORCE STOP: goals were frozen at
-        # present positions and torque is held there. Motor 12 never touched.
-        parked = False
-        if clean and not halt.is_set():
+        # Preserve the pulled player's park/hold vs fault/body-torque-off policy.
+        # It is not thermal qualification. Keep Force Stop wired THROUGH the
+        # final exit; previously it was unregistered before this last movement.
+        try:
+            parked, park_error = False, None
+            if clean and not halt.is_set():
+                try:
+                    arm.rest(deadline=deadline)  # reviewed exit only, once, not between notes
+                    parked = True
+                except Exception as exc:  # noqa: BLE001 - failed exit is a fault, NOT a completed take
+                    park_error = exc
             try:
-                arm.rest()
-                parked = True
-            except Exception:  # noqa: BLE001 - failed park = uncertain state: release, no retry
-                pass
-        arm.close(torque_off=not parked and not halt.is_set())
+                arm.close(torque_off=not parked and not halt.is_set())
+            finally:
+                if park_error is not None:
+                    raise park_error
+        finally:
+            with _halt_lock:
+                if _active_halt["event"] is halt:
+                    _active_halt["event"] = None
 
 
 # Seven Nation Army riff button: plays the operator-recorded low-E extra poses
@@ -219,7 +242,7 @@ def sna_running():
 
 
 manager = RehearsalManager(RUN_ROOT, registry=read_registry, execute=execute_take,
-                           lock=calibration.ownership_lock,
+                           admit=admit_motion, lock=calibration.ownership_lock,
                            calibration_active=calibration.session_active)
 calibration.set_play_guard(lambda: manager.busy or sna_running())
 
@@ -329,7 +352,7 @@ def bootstrap():
         keys, warning = key_context(registry["keys"]), None
     except RehearsalError as exc:
         registry, keys, warning = None, [], str(exc)
-    profiles = list(registry.get("path_profiles", ("rest_hub",))) if registry else ["rest_hub"]
+    profiles = list(registry.get("path_profiles", ())) if registry else []
     audio_model = os.environ.get("BASETEN_AUDIO_MODEL") or DEFAULT_AUDIO_MODEL
     return {"session_token": SESSION_TOKEN, "keys": keys, "warning": warning,
             "keypoint_warnings": registry["warnings"] if registry else [],
@@ -337,7 +360,14 @@ def bootstrap():
             "max_capture_seconds": MAX_CAPTURE_SECONDS, "max_play_seconds": MAX_PLAY_SECONDS,
             "note_pace_s": NOTE_PACE_S, "hardware": "real_single_tap_arm",
             "camera": False, "plucking": False, "auto_replay": False,
-            "path_profiles": profiles, "shortcuts_qualified": "row_hub" in profiles,
+            "path_profiles": profiles, "shortcuts_qualified": PROFILE in profiles,
+            "preferred_path_profile": PROFILE, "paths_ready": PROFILE in profiles,
+            "path_blocker": registry.get("path_blocker") if registry else warning,
+            "recorded_hover_count": len(registry.get("hovers", {})) if registry else 0,
+            "arm_capabilities": arm_capabilities(registry["keys"] if registry else set(),
+                                                primary_ready=PROFILE in profiles),
+            "coordination": "sequential shared-workspace ownership; secondary arm unavailable",
+            "extra_pose_playback_enabled": False,
             "key_present": bool(os.environ.get("BASETEN_API_KEY") or os.environ.get("BASETEN")),
             "planner_model": os.environ.get("BASETEN_MODEL") or DEFAULT_MODEL,
             "audio_model": audio_model, "audio_model_supported": audio_model in AUDIO_MODELS,
@@ -357,6 +387,7 @@ def plan(req: PlanReq):
     if not _plan_lock.acquire(blocking=False):
         raise RehearsalError("An arrangement request is already pending; no duplicate inference")
     try:
+        planner_keys = registry["paths"].keys if registry.get("paths") else registry["keys"]
         if req.songsterr_song_id is not None:
             # Official-tab mode is DETERMINISTIC: the tab's notes are mapped
             # pitch-exactly onto the recorded keys by local code (one global
@@ -366,25 +397,42 @@ def plan(req: PlanReq):
                 tab = songsterr.fetch_track_notes(req.songsterr_song_id, req.songsterr_track)
             except songsterr.SongsterrError as exc:
                 raise HTTPException(502, f"Songsterr: {exc}") from None
-            result = songsterr.transcribe(tab, registry["keys"], max_notes=MAX_NOTES)
+            result = songsterr.transcribe(tab, planner_keys, max_notes=MAX_NOTES)
             if not result["notes"]:
                 raise HTTPException(502, "This tab's notes do not map onto the recorded "
                                          "keys (out of range even after transposing)")
             return {"title": f"{tab['artist']} — {tab['song']} (official tab)",
                     "model": "deterministic-tab-transcription",
-                    "notes": [{"string": s, "fret": f} for s, f in result["notes"]],
-                    "path_profile": "rest_hub",
+                    "notes": [{"arm": PRIMARY, "string": s, "fret": f} for s, f in result["notes"]],
+                    "path_profile": PROFILE,
                     "tab_source": {"songId": req.songsterr_song_id,
                                    "artist": tab["artist"], "song": tab["song"],
                                    "track": tab["track_name"]},
                     "transcription": {k: result[k] for k in
                                       ("transpose", "exact", "approximated",
                                        "dropped", "total")}}
-        return arrange(req.prompt, registry["keys"])
+        return arrange(req.prompt, planner_keys,
+                       motion_context=registry["paths"].model_context() if registry.get("paths") else None)
     except (BasetenError, ValueError):
         raise HTTPException(502, "Baseten planning unavailable or invalid response; no automatic retry") from None
     finally:
         _plan_lock.release()
+
+
+class TrajectoryReq(StrictModel):
+    plan: TapPlan
+
+
+@app.post("/api/trajectory")
+def trajectory(req: TrajectoryReq):
+    """Local, device-free preview. No microphone, audio evaluator, or billed inference."""
+    try:
+        registry = read_registry()
+        compiled = admit_motion(req.plan, registry)
+        return {"executable": True, "blockers": [], "trajectory": compiled,
+                "capability_fingerprint": registry["fingerprint"]}
+    except RehearsalError as exc:
+        return {"executable": False, "blockers": [str(exc)], "trajectory": None}
 
 
 @app.get("/api/tabs/search")
@@ -425,21 +473,9 @@ class SnaReq(StrictModel):
 
 @app.post("/api/play-sna")
 def play_sna(req: SnaReq):
-    """Play the Seven Nation Army riff on the recorded low-E extra poses."""
-    if manager.busy:
-        raise RehearsalError("Finish the current take before playing the riff")
-    if calibration.session_active():
-        raise RehearsalError("Calibration holds the serial port — disconnect it first")
-    missing = sorted({name for name, _ in fret.SNA_RIFF} - set(fret.load_map()["extras"]))
-    if missing:
-        raise RehearsalError(f"Record the low-E extra poses first: {missing}")
-    with _sna_state_lock:
-        if _sna["running"]:
-            raise RehearsalError("The riff is already playing")
-        _sna.update(running=True, index=-1, total=len(fret.SNA_RIFF),
-                    stop=False, error=None)
-    threading.Thread(target=_sna_thread, daemon=True).start()
-    return {"started": True, "total": len(fret.SNA_RIFF)}
+    """The old riff bypass cannot re-enable contact-only rest-hub playback."""
+    raise RehearsalError("Extra-pose riff playback is blocked until its own lift/hover paths "
+                         "are recorded and reviewed; no rest-hub fallback. Use qualified grid notes.")
 
 
 class SnaStopReq(StrictModel):

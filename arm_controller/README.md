@@ -6,7 +6,13 @@ protocol over the Waveshare bus servo adapter — no lerobot install needed.
 **Single-arm rig (2026-09-19):** only the tapping/fretting arm (motor IDs
 7–12) works; the old pluck arm is out of service and `pluck.py` is retired.
 `fret.py` is the complete tool surface — it sounds notes by tapping the
-pre-recorded keys in `keyframes_arm2.json`.
+pre-recorded keys in `keyframes_arm2.json`. The returning second **tap** arm is
+planned for rows **7–11**, strings **1–6 right-to-left**; it is not enabled.
+
+**Current motion requirement:** [PATHS.md](PATHS.md) documents enforced lift-first
+routing with no global-neutral detour between notes. Contact-only rest/row-hub taps
+are now refused. The current map has 25 contacts but no per-key hovers/review, so
+Play is blocked until an operator-qualified small path subset exists.
 
 Baseline pose, measured geometry, world frame, and the keypoint XYZ layer
 are documented in **[CALIBRATION.md](CALIBRATION.md)**.
@@ -17,8 +23,9 @@ are documented in **[CALIBRATION.md](CALIBRATION.md)**.
 cd arm_controller
 uv run --with pyserial python app.py        # GUI (defaults to the working arm)
 uv run --with pyserial python fret.py --list          # show recorded keys
-uv run --with pyserial python fret.py --tap 3 2       # tap string 3, fret 2
-uv run --with pyserial python fret.py --seq 1,1 2,2   # tap a sequence
+uv run --with pyserial python fret.py --preview 1,1 1,2  # NO motion, check the whole route
+uv run --with pyserial python fret.py --path-template   # UNQUALIFIED review draft only
+# --tap/--seq require reviewed contact/hover paths and separate physical approval.
 ```
 
 (or `pip install pyserial && python app.py`)
@@ -42,14 +49,18 @@ reviews, cached tuning versions, and your preferred take across sessions/restart
 Play Next Take continues from a staged revision or a saved performed tuning without
 rebuilding the song; previous outcomes reach the planner as bounded context.
 No automatic physical replay, camera, raw-joint model paths, or gripper commands.
-The web player now releases **body torque only** at disconnect—support the body.
+The current web player parks through a reviewed final exit and holds body torque on
+clean completion; faults release body torque without recovery moves, and force stop
+holds frozen goals. Support the body; no independent thermal monitor is supplied.
 Runtime dependencies include jsonschema, NumPy, and SciPy as well as FastAPI,
 Uvicorn, pyserial, and the existing Python/Tk support.
 
-**Pulled-checkout blockers:** `keyframes_arm2.json` is empty (cleared for
-re-recording); no backup is restored automatically. The Inkling evaluator's
-last live probe timed out. Offline tests do not qualify either the endpoint
-or physical motion. The old fake console on 8787 is a different app.
+**Current blockers:** v4 contacts are present, but per-key hover poses and reviewed
+lift/translate/lower paths are missing. No backup, arbitrary offset or old kinematic
+map is substituted. Inkling live audio quality/ingestion and physical/thermal
+qualification remain separate; see [status](../guitar/STATUS.md). Offline tests
+qualify neither the endpoint nor physical motion. The old fake console on 8787
+is a different app.
 
 ### Web calibration (preferred over the GUI)
 

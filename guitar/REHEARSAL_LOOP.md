@@ -3,9 +3,12 @@
 **Primary target design; not physically qualified by this documentation.** A supervised
 single-arm subset is now implemented in [arm_controller/REHEARSAL.md](../arm_controller/REHEARSAL.md):
 bounded browser recording → audio assessment → proposed revision → a separate operator
-Play. No autonomous repeats or qualified shorter paths are enabled. The pulled grid is
-empty and the audio endpoint's last live test timed out; offline coverage is not live
-qualification. The older CLI/two-arm gaps below remain distinct.
+Play. No autonomous repeats are enabled. The [lift-first path implementation](../arm_controller/PATHS.md)
+now replaces contact-only neutral-hub taps, but the current 25 contact keys have no
+recorded/reviewed hovers, so motion is blocked. The returning second tap arm's rows
+7–11 remain unavailable until independently commissioned. Audio verification remains
+separate; offline coverage is not live qualification. The older CLI/two-arm gaps below
+remain distinct.
 [DESIGN.md](DESIGN.md) owns scope and [STATUS.md](STATUS.md) owns current implementation facts.
 Same physical guitar arms. Default press/release/pluck capabilities stay locally guarded.
 A planner revises a performance over a few attempts using optional pretrained audio-model

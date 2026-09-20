@@ -1,4 +1,4 @@
-"""Tapping/fretting tools for the ONLY working arm (IDs 7-12) — v3 single-arm.
+"""Lift-first tapping for the currently working arm (body IDs 7-11).
 
 THE PLUCK ARM (IDs 5,6,1,2,7,3) IS OUT OF SERVICE (2026-09-19). This arm is
 the whole instrument now: it sounds notes by TAPPING the pre-recorded keys
@@ -9,25 +9,25 @@ v4 MAPPING (2026-09-19, rig physically re-positioned and fully re-recorded;
 supersedes the v3 grid — old data lives in keyframes_arm2.backup-*.json):
   keyframes_arm2.json holds one keypoint per cell. Cell names accept the
   operator's v4 shorthand r{R}_{C} as well as the older pose-r{R}-c{C}:
-    r = fret row (r1-r4 fully recorded, 24 cells)
+    r = fret row (r1-r4 fully recorded plus r5_1, 25 current contacts)
     c = string/column, 1 = high E (rightmost) ... 6 = low E (leftmost)
   Values are RAW servo counts for IDs 7-11 — the played source of truth.
   The XYZ/degrees enrichment is dormant until a new kinematic reference is
   captured (the old one predates the move and was removed). 'rest' is the
-  safe park pose; 'rest-r{R}' hubs may be recorded later; other named
-  keyframes (e.g. 'neutral') load as extra poses. GRIPPER 12 NEVER commanded.
+  recorded entry/park pose. Each used cell also needs 'hover-r{R}-c{C}' and
+  a local path review; rest-r{R}/neutral cannot substitute for key hovers.
+  Future tap_secondary owns rows 7-11, but has NO connection/poses here.
+  GRIPPER 12 NEVER commanded.
 
-=== SAFETY / INTERFERENCE (v3 contract) ======================================
-Transitions are staged through lifted hubs, never sliding on the board:
-  LIFT to the current row's hub -> travel to the target row's hub (if the
-  row changed) -> PRESS. Rows without a recorded 'rest-r{R}' hub fall back
-  to the global 'rest' (the web executor's injected snapshot carries no row
-  hubs, so it always routes press -> rest -> press). First motion after
-  connect always routes via a hub from 'rest'-ward, so the arm can never
-  scrape across strings or neck. This is NOT a collision-free guarantee;
-  recorded poses and the full swept path still need operator qualification.
-  Audio/XYZ estimates cannot establish clearance. Never invent a shortcut
-  from a model recommendation.
+=== LIFT-FIRST EXECUTION ====================================================
+Contact-only rest/row-hub playback is retired: sending every joint toward a
+hub does not ensure that the fingertip lifts before lateral travel. Playback
+now requires reviewed contact/hover pairs and directed clearance transitions
+(tap_paths.py, PATHS.md). Every tap ends at its OWN hover; the next travels
+only after encoder arrival, never through global rest between notes. Missing
+hover/qualification/route data blocks before connection, with no guessed
+height, old-map fallback, or LLM waypoint generation. Recorded/reviewed paths
+still are not a software proof of collision-free physical motion.
 ==============================================================================
 
 XYZ deduction/extrapolation lives in gridfit.py: bilinear fits over the
@@ -43,71 +43,81 @@ CLI:
   uv run --with pyserial python fret.py --seq 1,1 2,1 3,2   # tap several keys in order
   uv run --with pyserial python fret.py --hold 3 2
   uv run --with pyserial python fret.py --release --rest
-  uv run --with pyserial python fret.py --qualify-row-hubs  # supervised slow walk,
-      # then records the operator's row_hub qualification for the web console
-  uv run --with pyserial python fret.py --sna           # Seven Nation Army riff on the
-      # recorded low-E extra poses ("2","3","5","7","10"); staged via global rest
+  uv run --with pyserial python fret.py --preview 1,1 1,2  # whole path, NO motion
+  uv run --with pyserial python fret.py --path-template   # UNQUALIFIED draft only
+Legacy row-hub sweep and contact-only extra-pose playback are blocked, not fallback paths.
 """
+import hashlib
 import json
+import math
 import re
 import time
 from pathlib import Path
 
 from app import FeetechBus
+from tap_arms import PRIMARY, ROW_OWNERS
+from tap_paths import (
+    ACC, BODY_IDS, CLEARANCE_DWELL_S, PRESS_SPEED, PRESS_TOL, PROFILE,
+    SETTLE_TIMEOUT, SETTLE_TOL, TAP_DWELL_S, TAP_SPEED, TRAVEL_SPEED,
+    SCHEMA, ClearancePaths, PathUnavailable, calibration_digest, contact_name,
+    hover_name, motion_contract,
+)
 
 FRET_PORT = "/dev/cu.wchusbserial5B8E1128501"  # re-enumerates on replug — check ls /dev/cu.*
 BAUD = 1_000_000
 
 KEYFRAMES_PATH = Path(__file__).parent / "keyframes_arm2.json"
 
-MOTOR_IDS = [7, 8, 9, 10, 11]  # gripper 12 deliberately absent
+MOTOR_IDS = list(BODY_IDS)  # gripper 12 deliberately absent
 STRING_NOTES = {1: "E4", 2: "B3", 3: "G3", 4: "D3", 5: "A2", 6: "E2"}
-# v4 grid (2026-09-19, rig re-positioned & fully re-recorded): 24 cells,
-# rows r1-r4 across all six strings. MAX_FRET leaves headroom for an r5 —
-# playability is always whatever cells actually exist in the file.
+# Primary-arm v4 grid: rows r1-r4 across six strings plus r5_1. Recording
+# availability and separate clearance review, not this bound, admit motion.
 MAX_FRET = 5
 
-TRAVEL_SPEED = 400
-PRESS_SPEED = 250
-TAP_SPEED = 1200   # tap press is fast — the impact is what sounds the note
-TAP_DWELL_S = 0.12  # contact time before lifting; short = staccato tap
-ACC = 30
-SETTLE_TOL = 30
-# Press stages stall AGAINST the string by design (poses are recorded already
-# pressed), so the elbow routinely stops tens of counts short of the target —
-# observed 45 on r2-c4. That is contact, not a fault; only travel/lift stages
-# keep the strict tolerance. v2 ignored settle results entirely, so PRESS_TOL
-# is still stricter than everything that played before v3.
-PRESS_TOL = 90
-SETTLE_TIMEOUT = 4.0
+# Existing speeds, tolerances and contact dwell live in tap_paths.py so their
+# exact values are bound into the path-review fingerprint. They are unchanged.
 
 _CELL = re.compile(r"pose[-_]?r(\d+)[-_]?c(\d+)$")
 _CELL_T = re.compile(r"pose[-_]?c(\d+)[-_]?r(\d+)$")  # transposed name variant
 _CELL_SHORT = re.compile(r"r(\d+)[-_](\d+)$")  # v4 operator shorthand: r{fret}_{string}
 _ROW_REST = re.compile(r"rest[-_]?r(\d+)$")
+_HOVER = re.compile(r"hover[-_]?r(\d+)[-_]?c(\d+)$")
 
 
 def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
-    """-> {"cells": {(string, fret): raw_pose}, "rest": pose,
-           "row_rests": {fret: pose}, "xyz": {(string, fret): xyz_cm dict},
+    """-> {"cells": {(string, fret): raw_pose}, "hovers": {(string, fret): raw_pose},
+           "rest": pose, "row_rests": {fret: pose}, "xyz": {(string, fret): xyz_cm dict},
            "degrees": {(string, fret): {sid: deg}}, "warns": [str]}
 
     entries optionally supplies an already-read local snapshot (never model data).
     """
-    cells, xyz, degrees, row_rests, extras, rest, warns = {}, {}, {}, {}, {}, None, []
+    cells, hovers, xyz, degrees, row_rests, extras, rest, warns = {}, {}, {}, {}, {}, {}, None, []
     for k in entries if entries is not None else json.loads(Path(path).read_text()):
         name = k["name"].strip().lower()
-        pose = {int(sid): int(v) for sid, v in k["positions"].items() if int(sid) in MOTOR_IDS}
+        positions = k["positions"]
+        if (set(positions) != {str(j) for j in MOTOR_IDS}
+                or any(type(v) is not int or not 0 <= v <= 4095 for v in positions.values())):
+            raise ValueError("Keyframes must contain complete raw body poses, IDs 7–11 only")
+        pose = {int(sid): v for sid, v in positions.items()}
         if name == "rest":
+            if rest is not None:
+                raise ValueError("duplicate rest keyframe")
             rest = pose
             continue
         rr = _ROW_REST.fullmatch(name)
         if rr:
             row_rests[int(rr.group(1))] = pose
             continue
+        hover = _HOVER.fullmatch(name)
+        if hover:
+            r, c = map(int, hover.groups())
+            if not (1 <= r <= max_fret and 1 <= c <= 6) or (c, r) in hovers:
+                raise ValueError(f"invalid/duplicate hover key: {k['name']}")
+            hovers[(c, r)] = pose
+            continue
         m = _CELL.fullmatch(name) or _CELL_T.fullmatch(name) or _CELL_SHORT.fullmatch(name)
         if not m:
-            if name.startswith(("pose", "rest")):  # near-miss of a grid name: flag it
+            if name.startswith(("pose", "rest", "hover")):  # near-miss of a grid name: flag it
                 warns.append(f"unrecognized keyframe name skipped: {k['name']}")
             elif len(pose) == len(MOTOR_IDS):
                 # operator-recorded extra pose (e.g. 'neutral' or the SNA frets)
@@ -127,8 +137,8 @@ def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
         if k.get("degrees"):
             degrees[(c, r)] = k["degrees"]
     if rest is None:
-        raise ValueError("no 'rest' keyframe in the grid — required as the safe hub")
-    return {"cells": cells, "rest": rest, "row_rests": row_rests,
+        raise ValueError("no 'rest' keyframe in the grid — required as the reviewed entry/exit pose")
+    return {"cells": cells, "hovers": hovers, "rest": rest, "row_rests": row_rests,
             "xyz": xyz, "degrees": degrees, "extras": extras, "warns": warns}
 
 
@@ -146,51 +156,56 @@ class Halted(RuntimeError):
 
 
 class FretArm:
-    # Class-level defaults so partially constructed instances (tests build them
-    # via __new__) behave like the plain rest_hub arm with no halt wiring.
+    arm_id = PRIMARY
     halt = None
-    path_profile = "rest_hub"
+    path_profile = PROFILE
+    motion_fault = None
 
     def __init__(self, port=FRET_PORT, baud=BAUD, *, grid=None, row_rests=None,
-                 path_profile=None, halt=None):
-        """path_profile selects a fixed local staging family (never model data):
-        "rest_hub" — every transition via the global rest; "row_hub" — via the
-        operator-recorded per-row lifted hubs (requires row_rests). Default:
-        row_hub when hubs are available, else rest_hub.
+                 path_profile=None, paths=None, halt=None):
+        """Connect only with a reviewed lift-first path registry, never model poses.
 
-        halt: optional threading.Event. Once set, the next motion check (stage
-        entry or ~30ms settle poll) freezes every motor at its present position
-        and raises Halted."""
-        if grid is not None:
-            # The web executor supplies a validated immutable snapshot, not model
-            # poses. Row hubs are only honored when explicitly passed alongside
-            # (same operator-recorded provenance as cells/rest).
-            self.cells, self.rest_pose, self.warnings = grid
-            self.row_rests = dict(row_rests) if row_rests else {}
-            self.xyz, self.extras = {}, {}
-        else:
-            m = load_map()
-            self.cells, self.rest_pose, self.warnings = m["cells"], m["rest"], m["warns"]
-            self.row_rests, self.xyz = m["row_rests"], m["xyz"]
-            self.extras = m["extras"]
-        if path_profile is None:
-            path_profile = "row_hub" if self.row_rests else "rest_hub"
-        if path_profile not in ("rest_hub", "row_hub"):
-            raise ValueError(f"unknown path profile: {path_profile}")
-        self.path_profile = path_profile
-        self.halt = halt
+        The arm must already be at its recorded entry/rest pose. Unknown start
+        positions are refused, not automatically homed across the strings.
+        halt freezes body goals at their current positions; it is not a hardware E-stop.
+        """
+        self.path_profile = path_profile or PROFILE
+        if self.path_profile != PROFILE:
+            raise PathUnavailable("Hub-only playback is disabled: it does not enforce lift before lateral travel")
+        if grid is None:
+            import kinematics
+            raw = KEYFRAMES_PATH.read_bytes()
+            snapshot = load_map(entries=json.loads(raw))
+            grid = (snapshot["cells"], snapshot["rest"], snapshot["warns"])
+            paths = ClearancePaths.from_snapshot(snapshot, hashlib.sha256(raw).hexdigest(),
+                                                 json.loads(kinematics.CAL_PATH.read_text()))
+        if not isinstance(paths, ClearancePaths):
+            raise PathUnavailable("A current operator-reviewed lift-first registry is required before connection")
+        self.cells, self.rest_pose, self.warnings = grid
+        if (paths.pose("rest") != self.rest_pose
+                or any(paths.pose(contact_name(k)) != self.cells.get(k) for k in paths.keys)):
+            raise PathUnavailable("Contact snapshot and reviewed lift-first paths disagree")
+        self.paths, self.halt = paths, halt
+        self.xyz, self.extras, self.row_rests = {}, {}, {}
+        self.holding, self.last_row, self.location = None, None, "rest"
+        self.motion_fault = None
         self.bus = FeetechBus(port, baud)
+        wrote_goals = False
         try:
             alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
             if len(alive) < len(MOTOR_IDS):
                 raise RuntimeError(f"fret arm motors responding: {alive} of {MOTOR_IDS} — check power")
-            for sid in alive:
+            present = self._require_at("rest")  # no goal/torque write on unknown starting state
+            self._check_halt()
+            # Hold fresh positions, never re-enable torque against stale servo goals.
+            wrote_goals = True
+            for sid in MOTOR_IDS:
+                self.bus.goto(sid, present[sid], speed=TRAVEL_SPEED, acc=ACC)
+            for sid in MOTOR_IDS:
                 self.bus.set_torque(sid, True)
         except Exception:
-            self.close(torque_off=True)  # BODY motors only, never the tool gripper
+            self.close(torque_off=wrote_goals)  # body only; no movement or grip reassertion
             raise
-        self.holding = None  # (string, fret) or None
-        self.last_row = None  # fret row the arm last worked in (None = unknown)
 
     def close(self, torque_off=False):
         # Operator supports the body for a normal torque-off disconnect. No homing
@@ -224,29 +239,53 @@ class FretArm:
             self._freeze()
             raise Halted("force stop: arm frozen mid-path, torque held")
 
-    def _move(self, pose, speed, wait=True, *, deadline=None, tol=SETTLE_TOL):
+    def _move(self, pose, speed, wait=True, *, deadline=None, tol=SETTLE_TOL, settle_s=0):
         if set(pose) != set(MOTOR_IDS) or any(type(v) is not int or not 0 <= v <= 4095
                                             for v in pose.values()):
             raise ValueError("A complete recorded body-joint pose is required")
-        self._check_halt()
-        if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError("Attempt deadline reached before a motion stage")
-        for sid, pos in pose.items():
-            self.bus.goto(sid, pos, speed=speed, acc=ACC)
-        if wait:
-            stage_deadline = time.monotonic() + SETTLE_TIMEOUT
-            if deadline is not None:
-                stage_deadline = min(stage_deadline, deadline)
-            while time.monotonic() < stage_deadline:
-                self._check_halt()
-                if all((p := self.bus.read_pos(sid)) is not None and abs(p - t) <= tol
-                       for sid, t in pose.items()):
-                    return True  # encoder tolerance only, not string/contact evidence
-                time.sleep(0.03)
-            # Previously this returned False which every caller ignored, and the
-            # next press still ran. A failed stage must stop without recovery moves.
-            raise TimeoutError("Encoder arrival timed out; state uncertain")
-        return False
+        if self.motion_fault:
+            raise PathUnavailable("Motion fault is latched; inspect rather than retry or home")
+        try:
+            self._check_halt()
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("Attempt deadline reached before a motion stage")
+            for sid, pos in pose.items():
+                self.bus.goto(sid, pos, speed=speed, acc=ACC)
+            if wait:
+                stage_deadline = time.monotonic() + SETTLE_TIMEOUT
+                if deadline is not None:
+                    stage_deadline = min(stage_deadline, deadline)
+                settled_since = None
+                while time.monotonic() < stage_deadline:
+                    self._check_halt()
+                    now = time.monotonic()
+                    positions = {sid: self.bus.read_pos(sid) for sid in MOTOR_IDS}
+                    at_target = all(type(positions[sid]) is int and abs(positions[sid] - t) <= tol
+                                    for sid, t in pose.items())
+                    settled_since = (now if settled_since is None else settled_since) if at_target else None
+                    if settled_since is not None and now - settled_since >= settle_s:
+                        return True  # encoder criterion only, NOT proof of string clearance
+                    time.sleep(0.03)
+                raise TimeoutError("Encoder arrival timed out; state uncertain")
+            return False
+        except Exception as exc:
+            self.motion_fault = type(exc).__name__
+            raise
+
+    def _require_at(self, name, tol=SETTLE_TOL):
+        if self.motion_fault:
+            raise PathUnavailable("Motion fault is latched; no automatic recovery")
+        pose = self.paths.pose(name)
+        try:
+            positions = {sid: self.bus.read_pos(sid) for sid in MOTOR_IDS}
+        except Exception:
+            self.motion_fault = "position_read_failed"
+            raise
+        if any(type(positions[sid]) is not int or abs(positions[sid] - t) > tol
+               for sid, t in pose.items()):
+            self.motion_fault = "unexpected_position"
+            raise PathUnavailable(f"Arm is not at the expected {name}; inspect/reposition before a new session")
+        return positions
 
     def _cell(self, string, fret):
         if (string, fret) not in self.cells:
@@ -255,66 +294,70 @@ class FretArm:
                              f"recorded cells (string, fret): {have}")
         return self.cells[(string, fret)]
 
-    def _hub(self, fret):
-        """Staging hub for a fret row under the active path profile: the row's
-        recorded lifted hub in row_hub mode (rest if that row has none), the
-        global rest otherwise."""
-        if self.path_profile != "row_hub":
-            return self.rest_pose
-        return self.row_rests.get(int(fret), self.rest_pose)
+    def _lift(self, *, deadline=None, stages=None, started=None):
+        """Finish the CURRENT key's reviewed lift before allowing any travel."""
+        if self.holding is not None:
+            self._require_at(contact_name(self.holding), PRESS_TOL)
+            self._named_stage("lift_clear", hover_name(self.holding), TRAVEL_SPEED,
+                              deadline=deadline, stages=stages, started=started)
+            self.holding = None
+        else:
+            self._require_at(self.location)
 
-    def _lift(self):
-        """Rise off the board into the current row's hub (rest if unknown)."""
-        hub = self._hub(self.last_row) if self.last_row is not None else self.rest_pose
-        self._move(hub, TRAVEL_SPEED)
+    def _named_stage(self, kind, name, speed, *, deadline=None, stages=None, started=None):
+        command = time.monotonic()
+        self._move(self.paths.pose(name), speed, deadline=deadline,
+                   tol=PRESS_TOL if kind in {"tap", "press"} else SETTLE_TOL,
+                   settle_s=0 if kind in {"tap", "press"} else CLEARANCE_DWELL_S)
+        self.location = name  # never advance symbolic state on timeout/fault
+        if stages is not None:
+            stages.append({"stage": kind, "pose": name,
+                           "command_start_s": round(command - started, 4),
+                           "encoder_ready_s": round(time.monotonic() - started, 4)})
 
-    def _stage(self, fret):
-        """Scrape-safe approach: lift, then cross to the target row's hub."""
-        self._lift()
-        if self.last_row != fret:
-            self._move(self._hub(fret), TRAVEL_SPEED)
+    def _approach(self, key, *, deadline=None, stages=None, started=None):
+        # Validate both this target AND its entry/exit before any release/motion.
+        self.paths.compile([key])
+        source = hover_name(self.holding) if self.holding else self.location
+        route = self.paths.route(source, hover_name(key))
+        self._lift(deadline=deadline, stages=stages, started=started)
+        for node in route:
+            self._named_stage("travel", node, TRAVEL_SPEED, deadline=deadline,
+                              stages=stages, started=started)
+        self._require_at(hover_name(key))
 
     # ---- tools ----------------------------------------------------------
 
     def tap_key(self, string, fret, *, deadline=None):
-        """Existing rest -> tap -> rest path, unchanged speeds/contact dwell.
+        """Own hover -> tap -> own hover; next key travels without neutral.
 
-        The only way this rig makes sound now — the tap impact is the attack.
-        Staged via lifted row hubs (scrape-safe); without recorded row hubs
-        (e.g. the web executor's injected snapshot) every hub is the global
-        rest, giving the press -> rest -> press path in exactly three motion
-        stages.
-
-        A cooperative Stop finishes this bounded tap/lift, then blocks the next
-        tap. It is NOT a motor emergency stop. A timeout raises immediately with
-        no subsequent motion or automatic rest. Timings below are encoder/command
-        observations, NOT verified contact or acoustic onsets.
+        The next stage cannot begin until the previous lift's continuous encoder
+        arrival check completes. This is not a contact/clearance sensor. All
+        segments need prior operator review; missing paths never get a fallback.
         """
-        s, f = int(string), int(fret)
-        pose = self._cell(s, f)
+        if type(string) is not int or type(fret) is not int:
+            raise ValueError("Key indices must be integers")
+        key = (string, fret)
+        self._cell(*key)
         started, stages = time.monotonic(), []
-
-        def stage(name, target, speed, tol=SETTLE_TOL):
-            command = time.monotonic() - started
-            self._move(target, speed, deadline=deadline, tol=tol)
-            stages.append({"stage": name, "command_start_s": round(command, 4),
-                           "encoder_ready_s": round(time.monotonic() - started, 4)})
-
-        lift_hub = self._hub(self.last_row) if self.last_row is not None else self.rest_pose
-        stage("lift", lift_hub, TRAVEL_SPEED)
-        if self.last_row != f and self._hub(f) is not lift_hub:
-            stage("travel", self._hub(f), TRAVEL_SPEED)
-        stage("tap", pose, TAP_SPEED, tol=PRESS_TOL)  # fast press = the note; stalls on contact
+        self._approach(key, deadline=deadline, stages=stages, started=started)
+        self._named_stage("tap", contact_name(key), TAP_SPEED, deadline=deadline,
+                          stages=stages, started=started)
+        self.holding = key
         time.sleep(TAP_DWELL_S)
-        stage("lift_clear", self._hub(f), TRAVEL_SPEED)
-        self.holding, self.last_row = None, f
-        return {"status": "command_completed", "string": s, "fret": f,
-                "note_open": STRING_NOTES.get(s), "stages": stages,
-                "xyz_cm": self.xyz.get((s, f)), "path_profile": self.path_profile,
+        self._lift(deadline=deadline, stages=stages, started=started)
+        self.last_row = fret
+        return {"status": "command_completed", "arm": self.arm_id, "string": string, "fret": fret,
+                "note_open": STRING_NOTES.get(string), "stages": stages,
+                "path_profile": self.path_profile,
                 "acoustic_success": "unknown", "contact_verified": False}
 
     def tap_sequence(self, keys, gap_s=0.3):
         """Tap several (string, fret) keys in order with a fixed gap."""
+        if type(gap_s) not in (int, float) or not math.isfinite(gap_s) or not 0 <= gap_s <= 2:
+            raise ValueError("Sequence gap must be finite, 0–2 seconds")
+        keys = tuple(keys)
+        self.paths.compile(keys)  # all transitions admitted before the first tap
         results = []
         for s, f in keys:
             results.append(self.tap_key(s, f))
@@ -323,21 +366,8 @@ class FretArm:
         return results
 
     def tap_pose(self, name, *, deadline=None):
-        """Tap an operator-recorded EXTRA pose by name (e.g. SNA low-E fret "7").
-
-        Extras live outside the qualified row-hub grid, so every transition
-        routes through the global rest hub: rest -> fast press -> rest."""
-        name = str(name).strip().lower()
-        if name not in self.extras:
-            raise ValueError(f"no extra pose named '{name}'; recorded extras: "
-                             f"{sorted(self.extras)}")
-        self._move(self.rest_pose, TRAVEL_SPEED, deadline=deadline)
-        self._move(self.extras[name], TAP_SPEED, deadline=deadline, tol=PRESS_TOL)
-        time.sleep(TAP_DWELL_S)
-        self._move(self.rest_pose, TRAVEL_SPEED, deadline=deadline)
-        self.holding, self.last_row = None, None
-        return {"status": "command_completed", "pose": name,
-                "acoustic_success": "unknown", "contact_verified": False}
+        """Extra contact-only poses cannot bypass the lift-first path contract."""
+        raise PathUnavailable("Extra-pose taps have no reviewed contact/hover paths; use qualified grid keys")
 
     def play_riff(self, riff, default_gap_s=0.25):
         """Tap a riff of (extra_pose_name, gap_after_s) pairs, rest-staged."""
@@ -351,27 +381,28 @@ class FretArm:
         return results
 
     def hold_fret(self, string, fret):
-        """Press (string, fret) and HOLD. Staged via row hubs — never slides."""
-        s, f = int(string), int(fret)
-        pose = self._cell(s, f)
-        self._stage(f)
-        self._move(pose, PRESS_SPEED, tol=PRESS_TOL)
-        self.holding, self.last_row = (s, f), f
-        return {"status": "holding", "string": s, "fret": f,
-                "note_open": STRING_NOTES.get(s), "target_raw": pose,
-                "xyz_cm": self.xyz.get((s, f))}
+        """Operator-only quiet hold; approach via the key's reviewed hover."""
+        key = (string, fret)
+        self._cell(*key)
+        self._approach(key)
+        self._named_stage("press", contact_name(key), PRESS_SPEED)
+        self.holding, self.last_row = key, fret
+        return {"status": "holding", "string": string, "fret": fret,
+                "note_open": STRING_NOTES.get(string)}
 
     def release_fret(self):
-        """Lift off the current hold into the row's hub."""
+        """Lift to this key's own hover, NEVER global neutral or gripper open."""
         was = self.holding
         self._lift()
-        self.holding = None
         return {"status": "released", "was_holding": was}
 
-    def rest(self):
-        """Park: lift out of the board first, then settle in the global rest."""
-        self._lift()
-        self._move(self.rest_pose, TRAVEL_SPEED)
+    def rest(self, *, deadline=None):
+        """Explicit end parking via reviewed exits; never a between-note route."""
+        source = hover_name(self.holding) if self.holding else self.location
+        route = self.paths.route(source, "rest")
+        self._lift(deadline=deadline)
+        for node in route:
+            self._named_stage("exit", node, TRAVEL_SPEED, deadline=deadline)
         self.holding, self.last_row = None, None
         return {"status": "rest"}
 
@@ -383,63 +414,43 @@ SNA_RIFF = [("7", None), ("7", None), ("10", None), ("7", None), ("5", None),
             ("7", None), ("7", None), ("10", None), ("7", None), ("5", None),
             ("3", None), ("5", None), ("3", None), ("2", 0.6)]
 
-QUALIFY_SPEED = 180  # deliberately slow: the operator watches every move
-
 
 def qualify_row_hubs(arm):
-    """Supervised slow walk of every motion family the row_hub profile can
-    execute: each row hub, every press/lift in that row, and every hub-to-hub
-    crossing. The OPERATOR watches for scrapes/interference and then decides;
-    this routine records their decision, it does not qualify anything itself."""
-    if not arm.row_rests:
-        raise ValueError("no rest-r{N} row hubs recorded — record them first")
-    arm.path_profile = "row_hub"
-    rows = sorted(arm.row_rests)
-    print(f"row hubs {rows}; slow speed {QUALIFY_SPEED}. Watch the arm. Ctrl-C aborts.")
-    arm._move(arm.rest_pose, QUALIFY_SPEED)
-    for r in rows:
-        print(f"-- row {r}: hub, then each recorded press")
-        arm._move(arm._hub(r), QUALIFY_SPEED)
-        for (s, f) in sorted(k for k in arm.cells if k[1] == r):
-            arm._move(arm.cells[(s, f)], QUALIFY_SPEED, tol=PRESS_TOL)
-            arm._move(arm._hub(r), QUALIFY_SPEED)
-    print("-- hub-to-hub crossings")
-    for a in rows:
-        for b in rows:
-            if a != b:
-                arm._move(arm._hub(a), QUALIFY_SPEED)
-                arm._move(arm._hub(b), QUALIFY_SPEED)
-    arm._move(arm.rest_pose, QUALIFY_SPEED)
-    print("walk complete.")
+    """Retired: a hub sweep does not establish a separate per-key lift phase."""
+    raise PathUnavailable("Row-hub qualification is retired; review a small contact/hover subset per PATHS.md")
 
 
 def record_row_hub_qualification():
-    """Persist the operator's decision, bound to the exact current keyframes."""
-    import hashlib
+    raise PathUnavailable("Row-hub approval cannot qualify lift_first; no calibration written")
 
+
+def path_template():
+    """Read-only draft with NO approved keys/edges. Never writes or moves an arm."""
     import kinematics
-    cal = json.loads(kinematics.CAL_PATH.read_text())
-    cal.setdefault("qualified_profiles", {})["row_hub"] = {
+    calibration = json.loads(kinematics.CAL_PATH.read_text())
+    return {PROFILE: {
+        "schema_version": SCHEMA,
         "keyframes_sha256": hashlib.sha256(KEYFRAMES_PATH.read_bytes()).hexdigest(),
-        "qualified_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-    }
-    kinematics.CAL_PATH.write_text(json.dumps(cal, indent=2))
-    return cal["qualified_profiles"]["row_hub"]
+        "calibration_sha256": calibration_digest(calibration),
+        "motion_contract": motion_contract(), "qualified_at": "",
+        "keys": [], "transit_edges": [],
+    }}
 
 
-# The COMPLETE tool surface for the rig — single arm, tap-based. The pluck
-# arm's tools (pluck.py) are retired and must not be added to any backend.
+# Model-callable primary tap surface. Quiet holds and global parking are local/
+# operator-only, not model choices between notes. Retired pluck tools stay absent.
 TOOLS = [
     {
         "name": "tap_key",
-        "description": "Tap one pre-recorded key to SOUND its note (fast press "
-                       "onto the fret, brief dwell, lift back to rest). This is "
+        "description": "Tap one pre-recorded key (fast press from its own hover, "
+                       "brief dwell, lift back to that key's hover). This is "
                        "the only way this rig makes sound. String 1 = high E "
                        "(rightmost) ... 6 = low E (leftmost); frets 1-4 recorded "
                        "(schema allows 5 for future rows; only RECORDED cells play "
                        "— check get_fret_position). "
-                       "Transit uses the existing rest hub; full paths "
-                       "still require operator qualification. Callers never plan paths.",
+                       "Transit finishes the current lift before taking the shortest "
+                       "reviewed hover route. No neutral between notes. Missing paths "
+                       "are rejected, never generated from coordinates or model output.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -452,7 +463,7 @@ TOOLS = [
     {
         "name": "tap_sequence",
         "description": "Tap several keys in order with a fixed gap between taps. "
-                       "Same mapping and rest-hub constraints as tap_key.",
+                       "Whole-sequence lift-first path admission before the first tap.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -465,31 +476,16 @@ TOOLS = [
                         "description": "[string, fret]",
                     },
                 },
-                "gap_s": {"type": "number", "default": 0.3,
-                          "description": "seconds between taps"},
+                "gap_s": {"type": "number", "default": 0.3, "minimum": 0, "maximum": 2,
+                          "description": "bounded seconds after each completed tap/lift"},
             },
             "required": ["keys"],
         },
     },
     {
-        "name": "hold_fret",
-        "description": "Press and HOLD a string at a fret (no tap attack — "
-                       "quiet press, e.g. to mute or prep). Stays pressed until "
-                       "release_fret or another hold_fret. Same mapping as "
-                       "tap_key; transit uses the existing rest hub.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "string": {"type": "integer", "minimum": 1, "maximum": 6},
-                "fret": {"type": "integer", "minimum": 1, "maximum": 5},
-            },
-            "required": ["string", "fret"],
-        },
-    },
-    {
         "name": "release_fret",
-        "description": "Lift the fretting finger off the currently held fret and "
-                       "return to rest (string rings open afterwards).",
+        "description": "Lift the fingertip to the current key's recorded hover. "
+                       "Does not park at global rest or open the gripper.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
@@ -524,17 +520,33 @@ TOOLS = [
             "required": ["string", "fret"],
         },
     },
-    {
-        "name": "fret_rest",
-        "description": "Fretting arm to its recorded rest pose; operator-qualified paths required.",
-        "parameters": {"type": "object", "properties": {}},
-    },
 ]
 
 
+# Models must name an owner even while only one arm is enabled. In particular,
+# adding a future tap_secondary enum must not silently dispatch it to this bus.
+for _tool in TOOLS:
+    _parameters = _tool["parameters"]
+    _parameters["properties"]["arm"] = {
+        "type": "string", "enum": [PRIMARY],
+        "description": "Working tap arm only. Secondary rows 7–11 are unavailable; no reassignment."}
+    _parameters["required"] = ["arm", *_parameters.get("required", [])]
+    _parameters["additionalProperties"] = False
+
+
 def dispatch(arm, tool_name, args):
-    """Backend entry point. get_fret_position and estimate_position work with
-    arm=None (no hardware)."""
+    """Primary-owned tools only; read-only position tools also require ownership."""
+    definition = next((t for t in TOOLS if t["name"] == tool_name), None)
+    if definition is None:
+        raise ValueError(f"unknown tool {tool_name}")
+    schema = definition["parameters"]
+    if (not isinstance(args, dict) or set(args) - set(schema["properties"])
+            or set(schema["required"]) - set(args)):
+        raise ValueError("Tool arguments must match the declared fields, including explicit arm ownership")
+    if args["arm"] != PRIMARY or (arm is not None and getattr(arm, "arm_id", None) != PRIMARY):
+        raise ValueError("Only tap_primary is enabled; never route a secondary-arm task onto this bus")
+    if tool_name == "tap_key" and args["fret"] not in ROW_OWNERS[PRIMARY]:
+        raise ValueError("tap_primary does not own that fret row")
     if tool_name == "get_fret_position":
         m = load_map()
         s, f = int(args["string"]), int(args["fret"])
@@ -562,20 +574,16 @@ def dispatch(arm, tool_name, args):
     if tool_name == "tap_key":
         return arm.tap_key(args["string"], args["fret"])
     if tool_name == "tap_sequence":
-        return arm.tap_sequence(args["keys"], float(args.get("gap_s", 0.3)))
-    if tool_name == "hold_fret":
-        return arm.hold_fret(args["string"], args["fret"])
+        return arm.tap_sequence(args["keys"], args.get("gap_s", 0.3))
     if tool_name == "release_fret":
         return arm.release_fret()
-    if tool_name == "fret_rest":
-        return arm.rest()
     raise ValueError(f"unknown tool {tool_name}")
 
 
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="Single-arm tap/fret tool CLI (v2 grid)")
+    ap = argparse.ArgumentParser(description="Primary tap arm: recorded keys + reviewed lift-first paths")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--pose", nargs=2, type=int, metavar=("STRING", "FRET"))
     ap.add_argument("--estimate", nargs=2, type=int, metavar=("STRING", "FRET"),
@@ -586,8 +594,10 @@ if __name__ == "__main__":
     ap.add_argument("--hold", nargs=2, type=int, metavar=("STRING", "FRET"))
     ap.add_argument("--release", action="store_true")
     ap.add_argument("--rest", action="store_true")
-    ap.add_argument("--profile", choices=["auto", "rest_hub", "row_hub"], default="auto",
-                    help="staging family for --tap/--seq/--hold (auto: row_hub if hubs exist)")
+    ap.add_argument("--profile", choices=["auto", "lift_first", "rest_hub", "row_hub"], default="auto",
+                    help="auto selects lift_first; legacy hub-only profiles are refused")
+    ap.add_argument("--preview", nargs="+", metavar="S,F", help="compile named paths only; NO motion/devices")
+    ap.add_argument("--path-template", action="store_true", help="print an UNQUALIFIED review draft; no writes/motion")
     ap.add_argument("--sna", action="store_true",
                     help="play the Seven Nation Army riff on the recorded low-E "
                          "extra poses (2/3/5/7/10)")
@@ -598,20 +608,36 @@ if __name__ == "__main__":
                          "the operator's qualification decision")
     a = ap.parse_args()
 
+    if a.path_template:
+        print(json.dumps(path_template(), indent=2))
+        raise SystemExit(0)
+    if a.qualify_row_hubs:
+        ap.error("Row-hub sweep retired. Record/review a small lift-first subset; see PATHS.md. No motion started.")
+    if a.preview:
+        import kinematics
+        try:
+            raw = KEYFRAMES_PATH.read_bytes()
+            paths = ClearancePaths.from_snapshot(load_map(entries=json.loads(raw)), hashlib.sha256(raw).hexdigest(),
+                                                 json.loads(kinematics.CAL_PATH.read_text()))
+            print(json.dumps(paths.compile([tuple(map(int, k.split(","))) for k in a.preview]), indent=2))
+        except (ValueError, OSError) as exc:
+            ap.error(f"Path blocked (no motion): {exc}")
+        raise SystemExit(0)
+
     if a.list or a.pose or a.estimate:
         m = load_map()
         for w in m["warns"]:
             print("WARN:", w)
         if a.list:
             print(f"{len(m['cells'])} cells recorded (string, fret): {sorted(m['cells'])}")
-            print(f"row hubs: {sorted(m['row_rests'])}   rest: {m['rest']}")
+            print(f"hover pairs: {sorted(m['hovers'])}; legacy row hubs: {sorted(m['row_rests'])}")
             print(f"extra poses: {sorted(m['extras'])}")
         if a.pose:
             print(json.dumps(dispatch(None, "get_fret_position",
-                                      {"string": a.pose[0], "fret": a.pose[1]}), indent=2))
+                                      {"arm": PRIMARY, "string": a.pose[0], "fret": a.pose[1]}), indent=2))
         if a.estimate:
             print(json.dumps(dispatch(None, "estimate_position",
-                                      {"string": a.estimate[0], "fret": a.estimate[1]}),
+                                      {"arm": PRIMARY, "string": a.estimate[0], "fret": a.estimate[1]}),
                              indent=2))
         raise SystemExit(0)
 
@@ -619,14 +645,6 @@ if __name__ == "__main__":
     for w in arm.warnings:
         print("WARN:", w)
     try:
-        if a.qualify_row_hubs:
-            qualify_row_hubs(arm)
-            answer = input("Did every move stay clear of strings/neck/body? "
-                           "Type QUALIFIED to record, anything else to abort: ")
-            if answer.strip() == "QUALIFIED":
-                print("recorded:", record_row_hub_qualification())
-            else:
-                print("not recorded — row_hub stays unqualified")
         if a.sna:
             print(f"Seven Nation Army — {len(SNA_RIFF)} taps on low-E poses "
                   f"{sorted(set(n for n, _ in SNA_RIFF), key=int)}")

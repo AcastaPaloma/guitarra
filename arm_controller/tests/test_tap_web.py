@@ -7,6 +7,7 @@ import pytest
 import webapp
 from fastapi.testclient import TestClient
 from rehearsal import RehearsalManager
+from path_fixtures import fake_arm, path_registry
 from test_rehearsal import (
     capture_end,
     capture_start,
@@ -50,7 +51,8 @@ def test_page_loading_opens_no_device_or_model(client):
     assert client.get("/static/capture.js").status_code == 200
     assert client.get("/calibrate").status_code == 200
     data = client.get("/api/bootstrap").json()
-    assert data["path_profiles"] == ["rest_hub"] and data["camera"] is False
+    assert data["path_profiles"] == [] and data["camera"] is False
+    assert data["preferred_path_profile"] == "lift_first"
     assert data["auto_replay"] is False and data["active_attempt"] is None
     assert not webapp.manager.execute.called and not webapp.manager.evaluate.called
 
@@ -167,15 +169,17 @@ def test_registry_rejects_partial_or_gripper_poses(tmp_path, monkeypatch):
 def test_executor_disconnect_is_body_only_no_homing_even_on_fault(monkeypatch):
     import threading
     arm = MagicMock()
-    monkeypatch.setattr(webapp, "read_registry", registry)
+    monkeypatch.setattr(webapp, "read_registry", path_registry)
     monkeypatch.setattr(fret, "FretArm", lambda **kwargs: arm)
-    assert webapp.execute_take(plan(), registry(), threading.Event(), lambda event: None)
-    arm.close.assert_called_once_with(torque_off=False)  # parked at rest, held there
-    arm.rest.assert_called_once_with()
+    take = plan().model_copy(update={"path_profile": "lift_first"})
+    assert webapp.execute_take(take, path_registry(), threading.Event(), lambda event: None)
+    arm.close.assert_called_once_with(torque_off=False)  # reviewed final exit; held there
+    arm.rest.assert_called_once()
+    assert "deadline" in arm.rest.call_args.kwargs
     arm.reset_mock()
     arm.tap_key.side_effect = TimeoutError("fixture")
     with pytest.raises(TimeoutError):
-        webapp.execute_take(plan(), registry(), threading.Event(), lambda event: None)
+        webapp.execute_take(take, path_registry(), threading.Event(), lambda event: None)
     arm.close.assert_called_once_with(torque_off=True)
     arm.rest.assert_not_called()
     assert arm.tap_key.call_count == 1
@@ -202,9 +206,8 @@ def test_encoder_timeout_is_not_ignored_and_does_not_press(monkeypatch):
     with pytest.raises(TimeoutError):
         arm._move(pose, fret.TRAVEL_SPEED)
     assert {call.args[0] for call in arm.bus.goto.call_args_list} == set(fret.MOTOR_IDS)
-    arm.cells, arm.rest_pose = {(1, 1): pose}, pose
-    arm.row_rests, arm.xyz, arm.last_row = {}, {}, None
+    arm, _, _, _ = fake_arm(monkeypatch)
     arm._move = MagicMock(side_effect=TimeoutError("fixture"))
     with pytest.raises(TimeoutError):
         arm.tap_key(1, 1)
-    assert arm._move.call_count == 1  # no press/lift/recovery after failed initial hub stage
+    assert arm._move.call_count == 1  # no press/lift/recovery after failed initial hover entry

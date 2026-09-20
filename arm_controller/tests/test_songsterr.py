@@ -133,6 +133,8 @@ def test_plan_with_tab_is_deterministic_no_model_call(client, monkeypatch):  # n
     assert response.status_code == 200
     data = response.json()
     assert data["model"] == "deterministic-tab-transcription"
-    assert data["notes"] == [{"string": 1, "fret": 1}, {"string": 2, "fret": 2}]
+    assert data["notes"] == [{"arm": "tap_primary", "string": 1, "fret": 1},
+                             {"arm": "tap_primary", "string": 2, "fret": 2}]
+    assert data["path_profile"] == "lift_first"
     assert data["transcription"]["exact"] == 2 and data["transcription"]["transpose"] == 0
     assert data["tab_source"]["song"] == "S"
