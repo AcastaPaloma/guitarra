@@ -29,7 +29,7 @@ def motion_contract() -> str:
     """Changing staging or its settings invalidates previously reviewed paths."""
     return hashlib.sha256(json.dumps({
         "schema": SCHEMA, "body_ids": BODY_IDS,
-        "driver": "raw-goals-per-joint;lift-arrival-before-transit;no-rest-interior-v1",
+        "driver": "raw-goals-per-joint;shoulder-first-lift;lift-arrival-before-transit;no-rest-interior-v2",
         "travel_speed": TRAVEL_SPEED, "press_speed": PRESS_SPEED, "tap_speed": TAP_SPEED,
         "tap_dwell_s": TAP_DWELL_S, "acc": ACC, "settle_tol": SETTLE_TOL,
         "press_tol": PRESS_TOL, "settle_timeout": SETTLE_TIMEOUT,

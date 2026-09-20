@@ -306,12 +306,32 @@ class FretArm:
 
     def _named_stage(self, kind, name, speed, *, deadline=None, stages=None, started=None):
         command = time.monotonic()
-        self._move(self.paths.pose(name), speed, deadline=deadline,
+        target = self.paths.pose(name)
+        shoulder_first = False
+        if kind == "lift_clear":
+            # Operator directive 2026-09-20: the SHOULDER (ID 8) rises to its
+            # hover value and settles BEFORE any other joint gets a goal, so the
+            # fingertip leaves the string straight up instead of sweeping
+            # sideways while still low (stray plucks on neighboring strings).
+            # The interim goal set holds every other joint at its present
+            # encoder reading; endpoints are still the reviewed poses only.
+            held = {}
+            for sid in MOTOR_IDS:
+                for _ in range(5):
+                    p = self.bus.read_pos(sid)
+                    if p is not None:
+                        held[sid] = p
+                        break
+            if set(held) == set(MOTOR_IDS):
+                shoulder_first = True
+                self._move({**held, 8: target[8]}, speed, deadline=deadline,
+                           settle_s=CLEARANCE_DWELL_S)
+        self._move(target, speed, deadline=deadline,
                    tol=PRESS_TOL if kind in {"tap", "press"} else SETTLE_TOL,
                    settle_s=0 if kind in {"tap", "press"} else CLEARANCE_DWELL_S)
         self.location = name  # never advance symbolic state on timeout/fault
         if stages is not None:
-            stages.append({"stage": kind, "pose": name,
+            stages.append({"stage": kind, "pose": name, "shoulder_first": shoulder_first,
                            "command_start_s": round(command - started, 4),
                            "encoder_ready_s": round(time.monotonic() - started, 4)})
 

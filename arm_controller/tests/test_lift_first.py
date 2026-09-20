@@ -76,16 +76,26 @@ def test_disconnected_hover_graph_never_falls_back_to_rest_before_next_key():
         reg["paths"].compile([(1, 1), (1, 2)])
 
 
+def shoulder_first(arm, contact, hover):
+    """Interim goal set of a lift: every joint held, ONLY the shoulder raised."""
+    return {**arm.paths.pose(contact), 8: arm.paths.pose(hover)[8]}
+
+
 @pytest.mark.parametrize("next_key", [(1, 2), (2, 1)])  # changed fret AND neighboring string
 def test_actual_taps_lift_current_key_then_travel_then_lower_no_neutral(monkeypatch, next_key):
     arm, bus, moves, clock = fake_arm(monkeypatch, registry=path_registry(keys=((1, 1), next_key)))
     first = arm.tap_key(1, 1)
     second = arm.tap_key(*next_key)
-    names = ["hover-r1-c1", "key-r1-c1", "hover-r1-c1",
-             hover_name(next_key), contact_name(next_key), hover_name(next_key)]
-    assert moves == [arm.paths.pose(n) for n in names]
+    assert moves == [
+        arm.paths.pose("hover-r1-c1"), arm.paths.pose("key-r1-c1"),
+        shoulder_first(arm, "key-r1-c1", "hover-r1-c1"), arm.paths.pose("hover-r1-c1"),
+        arm.paths.pose(hover_name(next_key)), arm.paths.pose(contact_name(next_key)),
+        shoulder_first(arm, contact_name(next_key), hover_name(next_key)),
+        arm.paths.pose(hover_name(next_key)),
+    ]
     assert all(p != arm.rest_pose for p in moves)
-    assert moves[1][7] == moves[2][7]  # yaw not retargeted until AFTER own-hover lift
+    assert moves[1][7] == moves[2][7] == moves[3][7]  # yaw untouched through the whole lift
+    assert moves[2] == {**moves[1], 8: moves[3][8]}   # shoulder rises before any other joint
     assert first["stages"][-1]["pose"] == "hover-r1-c1"
     assert second["stages"][0]["pose"] == hover_name(next_key)
     assert clock.now >= 4 * fret.CLEARANCE_DWELL_S
@@ -119,7 +129,9 @@ def test_repeated_key_reuses_hover_but_never_skips_the_tap_lift(monkeypatch):
     arm.tap_key(1, 1)
     moves.clear()
     arm.tap_key(1, 1)
-    assert moves == [arm.paths.pose("key-r1-c1"), arm.paths.pose("hover-r1-c1")]
+    assert moves == [arm.paths.pose("key-r1-c1"),
+                     shoulder_first(arm, "key-r1-c1", "hover-r1-c1"),
+                     arm.paths.pose("hover-r1-c1")]
 
 
 def test_lift_timeout_latches_and_never_travels_or_recovers(monkeypatch):
@@ -147,7 +159,8 @@ def test_held_key_is_lifted_before_any_retargeting(monkeypatch):
     arm.hold_fret(1, 1)
     moves.clear()
     arm.tap_key(1, 2)
-    assert moves[:2] == [arm.paths.pose("hover-r1-c1"), arm.paths.pose("hover-r2-c1")]
+    assert moves[:3] == [shoulder_first(arm, "key-r1-c1", "hover-r1-c1"),
+                         arm.paths.pose("hover-r1-c1"), arm.paths.pose("hover-r2-c1")]
 
 
 def test_encoder_drift_at_hover_prevents_lateral_command(monkeypatch):
