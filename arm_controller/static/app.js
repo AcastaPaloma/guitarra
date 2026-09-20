@@ -552,13 +552,16 @@ async function refreshHistory(id) {
   const assessed = sessionHistory.takes.filter(t => t.assessment).length;
   $('history-summary').textContent = `${sessionHistory.title} · ${sessionHistory.takes.length} takes · ${tunings.size} tunings · ${assessed} audio reviews`;
   $('take-history').replaceChildren();
+  const ordered = sessionHistory.takes;  // server order: take 1 first
   for (const take of [...sessionHistory.takes].reverse()) {
     const row = textNode('div', '', 'take-row' + (take.preferred_by_operator ? ' preferred' : ''));
     const name = textNode('div', `Take ${take.take_number}`, 'take-name');
-    const detail = textNode('div', take.assessment ? `notes ${rating(take.assessment.notes_match)} · timing ${rating(take.assessment.timing_match)}` : rating(take.phase));
+    const detail = textNode('div', take.assessment ? `${typeof take.assessment.score === 'number' ? `score ${take.assessment.score}/10 · ` : ''}notes ${rating(take.assessment.notes_match)} · timing ${rating(take.assessment.timing_match)}` : rating(take.phase));
     const time = Number.isFinite(take.command_elapsed_s) ? `${take.command_elapsed_s.toFixed(2)}s commands` : 'not completed';
     const delta = Number.isFinite(take.command_delta_from_first_s) ? ` · ${take.command_delta_from_first_s >= 0 ? '+' : ''}${take.command_delta_from_first_s.toFixed(2)}s vs first` : '';
     detail.append(textNode('p', `${time}${delta}${take.audio_incomplete ? ' · partial audio' : ''}`, 'take-meta'));
+    const previous = ordered[ordered.indexOf(take) - 1];
+    detail.append(textNode('p', takeDiff(take, previous), 'take-meta take-diff'));
     const buttons = textNode('div', '', 'take-buttons');
     for (const [label, enabled, action] of [
       ['listen', take.audio_available, () => listenTake(take)],
@@ -592,6 +595,39 @@ function useTuning(take) {
   showArrangement(take.plan.notes, sessionHistory.title, take.plan.path_profile); switchTab(false);
   $('review').hidden = true; lastReview = null; controls();
   say(`Loaded Take ${take.take_number}'s tuning. No motion started; fresh admission/confirmation required.`);
+}
+
+function takeDiff(take, previous) {
+  // Human-readable "what changed since the last take": plan tweaks (the
+  // model's or the operator's) plus how the measured/judged results moved.
+  if (!previous) return 'baseline take — nothing to compare yet';
+  const parts = [];
+  const a = previous.plan?.notes || [], b = take.plan?.notes || [];
+  if ((take.plan?.path_profile) !== (previous.plan?.path_profile)) {
+    parts.push(`path ${previous.plan?.path_profile} → ${take.plan?.path_profile}`);
+  }
+  if (a.length !== b.length) {
+    parts.push(`${a.length} → ${b.length} notes (different phrase)`);
+  } else {
+    for (let i = 0; i < b.length; i++) {
+      if (a[i].string !== b[i].string || a[i].fret !== b[i].fret) {
+        parts.push(`note ${i + 1}: s${a[i].string}f${a[i].fret} → s${b[i].string}f${b[i].fret}`);
+      } else if (a[i].pause_ms !== b[i].pause_ms) {
+        parts.push(`note ${i + 1}: pause ${a[i].pause_ms} → ${b[i].pause_ms}ms`);
+      }
+      if (parts.length > 5) { parts.push('…'); break; }
+    }
+    if (!parts.length) parts.push('same tuning as previous take');
+  }
+  const scoreA = previous.assessment?.score, scoreB = take.assessment?.score;
+  if (typeof scoreA === 'number' && typeof scoreB === 'number' && scoreA !== scoreB) {
+    parts.push(`score ${scoreA} → ${scoreB}${scoreB > scoreA ? ' ↑' : ' ↓'}`);
+  }
+  const heard = t => t.local_acoustic_summary?.summary?.notes_heard ?? t.local_acoustic_summary?.alignment?.notes_heard;
+  if (heard(previous) != null && heard(take) != null && heard(previous) !== heard(take)) {
+    parts.push(`heard ${heard(previous)} → ${heard(take)}`);
+  }
+  return 'Δ vs take ' + previous.take_number + ': ' + parts.join(' · ');
 }
 
 async function listenTake(take) {
