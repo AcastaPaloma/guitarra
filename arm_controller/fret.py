@@ -46,6 +46,8 @@ CLI:
   uv run --with pyserial python fret.py --release --rest
   uv run --with pyserial python fret.py --qualify-row-hubs  # supervised slow walk,
       # then records the operator's row_hub qualification for the web console
+  uv run --with pyserial python fret.py --sna           # Seven Nation Army riff on the
+      # recorded low-E extra poses ("2","3","5","7","10"); staged via global rest
 """
 import json
 import re
@@ -89,7 +91,7 @@ def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
 
     entries optionally supplies an already-read local snapshot (never model data).
     """
-    cells, xyz, degrees, row_rests, rest, warns = {}, {}, {}, {}, None, []
+    cells, xyz, degrees, row_rests, extras, rest, warns = {}, {}, {}, {}, {}, None, []
     for k in entries if entries is not None else json.loads(Path(path).read_text()):
         name = k["name"].strip().lower()
         pose = {int(sid): int(v) for sid, v in k["positions"].items() if int(sid) in MOTOR_IDS}
@@ -102,7 +104,11 @@ def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
             continue
         m = _CELL.fullmatch(name) or _CELL_T.fullmatch(name)
         if not m:
-            warns.append(f"unrecognized keyframe name skipped: {k['name']}")
+            if name.startswith(("pose", "rest")):  # near-miss of a grid name: flag it
+                warns.append(f"unrecognized keyframe name skipped: {k['name']}")
+            elif len(pose) == len(MOTOR_IDS):
+                # operator-recorded extra pose (e.g. the SNA low-E frets "2".."10")
+                extras[name] = pose
             continue
         r, c = (int(m.group(1)), int(m.group(2))) if _CELL.fullmatch(name) else \
                (int(m.group(2)), int(m.group(1)))
@@ -120,7 +126,7 @@ def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
     if rest is None:
         raise ValueError("no 'rest' keyframe in the grid — required as the safe hub")
     return {"cells": cells, "rest": rest, "row_rests": row_rests,
-            "xyz": xyz, "degrees": degrees, "warns": warns}
+            "xyz": xyz, "degrees": degrees, "extras": extras, "warns": warns}
 
 
 def load_grid(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
@@ -158,11 +164,12 @@ class FretArm:
             # (same operator-recorded provenance as cells/rest).
             self.cells, self.rest_pose, self.warnings = grid
             self.row_rests = dict(row_rests) if row_rests else {}
-            self.xyz = {}
+            self.xyz, self.extras = {}, {}
         else:
             m = load_map()
             self.cells, self.rest_pose, self.warnings = m["cells"], m["rest"], m["warns"]
             self.row_rests, self.xyz = m["row_rests"], m["xyz"]
+            self.extras = m["extras"]
         if path_profile is None:
             path_profile = "row_hub" if self.row_rests else "rest_hub"
         if path_profile not in ("rest_hub", "row_hub"):
@@ -312,6 +319,34 @@ class FretArm:
                 time.sleep(gap_s)
         return results
 
+    def tap_pose(self, name, *, deadline=None):
+        """Tap an operator-recorded EXTRA pose by name (e.g. SNA low-E fret "7").
+
+        Extras live outside the qualified row-hub grid, so every transition
+        routes through the global rest hub: rest -> fast press -> rest."""
+        name = str(name).strip().lower()
+        if name not in self.extras:
+            raise ValueError(f"no extra pose named '{name}'; recorded extras: "
+                             f"{sorted(self.extras)}")
+        self._move(self.rest_pose, TRAVEL_SPEED, deadline=deadline)
+        self._move(self.extras[name], TAP_SPEED, deadline=deadline, tol=PRESS_TOL)
+        time.sleep(TAP_DWELL_S)
+        self._move(self.rest_pose, TRAVEL_SPEED, deadline=deadline)
+        self.holding, self.last_row = None, None
+        return {"status": "command_completed", "pose": name,
+                "acoustic_success": "unknown", "contact_verified": False}
+
+    def play_riff(self, riff, default_gap_s=0.25):
+        """Tap a riff of (extra_pose_name, gap_after_s) pairs, rest-staged."""
+        missing = sorted({str(n).strip().lower() for n, _ in riff} - set(self.extras))
+        if missing:
+            raise ValueError(f"riff needs extra poses that are not recorded: {missing}")
+        results = []
+        for name, gap in riff:
+            results.append(self.tap_pose(name))
+            time.sleep(gap if gap is not None else default_gap_s)
+        return results
+
     def hold_fret(self, string, fret):
         """Press (string, fret) and HOLD. Staged via row hubs — never slides."""
         s, f = int(string), int(fret)
@@ -337,6 +372,13 @@ class FretArm:
         self.holding, self.last_row = None, None
         return {"status": "rest"}
 
+
+# Seven Nation Army, low-E frets, using the operator's recorded extra poses
+# named "2","3","5","7","10". (name, gap_after_s); None = the default gap.
+SNA_RIFF = [("7", None), ("7", None), ("10", None), ("7", None), ("5", None),
+            ("3", None), ("2", 0.6),
+            ("7", None), ("7", None), ("10", None), ("7", None), ("5", None),
+            ("3", None), ("5", None), ("3", None), ("2", 0.6)]
 
 QUALIFY_SPEED = 180  # deliberately slow: the operator watches every move
 
@@ -541,6 +583,11 @@ if __name__ == "__main__":
     ap.add_argument("--rest", action="store_true")
     ap.add_argument("--profile", choices=["auto", "rest_hub", "row_hub"], default="auto",
                     help="staging family for --tap/--seq/--hold (auto: row_hub if hubs exist)")
+    ap.add_argument("--sna", action="store_true",
+                    help="play the Seven Nation Army riff on the recorded low-E "
+                         "extra poses (2/3/5/7/10)")
+    ap.add_argument("--pose-name", metavar="NAME",
+                    help="tap one recorded extra pose by name (e.g. 7)")
     ap.add_argument("--qualify-row-hubs", action="store_true",
                     help="supervised slow walk of all row_hub motions, then record "
                          "the operator's qualification decision")
@@ -553,6 +600,7 @@ if __name__ == "__main__":
         if a.list:
             print(f"{len(m['cells'])} cells recorded (string, fret): {sorted(m['cells'])}")
             print(f"row hubs: {sorted(m['row_rests'])}   rest: {m['rest']}")
+            print(f"extra poses: {sorted(m['extras'])}")
         if a.pose:
             print(json.dumps(dispatch(None, "get_fret_position",
                                       {"string": a.pose[0], "fret": a.pose[1]}), indent=2))
@@ -574,6 +622,13 @@ if __name__ == "__main__":
                 print("recorded:", record_row_hub_qualification())
             else:
                 print("not recorded — row_hub stays unqualified")
+        if a.sna:
+            print(f"Seven Nation Army — {len(SNA_RIFF)} taps on low-E poses "
+                  f"{sorted(set(n for n, _ in SNA_RIFF), key=int)}")
+            for r in arm.play_riff(SNA_RIFF, default_gap_s=max(a.gap, 0.05)):
+                print(r)
+        if a.pose_name:
+            print(arm.tap_pose(a.pose_name))
         if a.tap:
             print(arm.tap_key(a.tap[0], a.tap[1]))
         if a.seq:
