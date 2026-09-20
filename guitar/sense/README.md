@@ -13,7 +13,8 @@ changing either model's weights. Vision is an optional diagnostic, not a require
 | [`camera_relay.py`](camera_relay.py) | Optional utility; explicitly running it opens a selected local camera and serves localhost MJPEG/JPEG/health. The agent never starts it. Has top-level startup; do not import as a test helper. |
 | [`camera.py`](camera.py) | Optional relay client; called by the agent only with explicit `--camera`/`use_camera=True`. Default sessions never probe it. `/astra.jpg` is a historical route name, not a provider requirement. |
 | [`mic.py`](mic.py) | 44.1 kHz mono ring buffer plus local level/onset/YIN-pitch estimates; not an audio-language model or trained guitar classifier. |
-| [`../model/audio.py`](../model/audio.py) | Separate opt-in file evaluator: PCM16 WAV validation/resampling, upload, structured assessment. No capture/devices/tools; live Inkling endpoint remains unavailable. |
+| [`../model/audio.py`](../model/audio.py) | Opt-in file evaluator: WAV validation/resampling, grounded structured assessment, bounded Inkling/Small fallback. Both endpoints passed synthetic audio checks; real-guitar critique remains unvalidated. No capture/devices/tools in this module. |
+| [`../../arm_controller/tap_audio_metrics.py`](../../arm_controller/tap_audio_metrics.py) | Current web DSP v2: source-bound unique attack/pitch estimates with explicit uncertainty, supplied to both Inkling and Kimi. Separate from the legacy mic/scorer here; not calibrated contact or absolute-delay measurement. |
 
 `mic.py` and `camera.py` already exist. Old references to missing `sense/calibrate.py`,
 separate `onsets.py`, `timing.py`, or a completed multi-strum packet pipeline are not the
@@ -51,10 +52,13 @@ These are useful development measurements, but their explanatory strings are hyp
 An explicit **file-based audio evaluator** now exists outside the capture path. It accepts
 one selected PCM16 WAV with upload consent, converts it to 16 kHz mono, supplies a fixed
 rubric and expected phrase, and validates the returned assessment. See [AUDIO.md](../model/AUDIO.md).
-Inkling still timed out on a synthetic audio request; successful raw-audio processing and
-musical assessment are not yet established. No model fine-tuning or classifier training is involved.
-The active Kimi planner still receives text/state, not recordings. No report is automatically
-fed into the rehearsal loop yet. Do not claim the planner listened when it received a summary.
+Full Inkling and Small now passed approved synthetic audio requests with audio-token
+usage; the old timeout did not establish an access denial. Real-guitar assessment is still
+unvalidated. No fine-tuning/classifier training is involved. The single-arm web rehearsal
+now supplies local DSP estimates to the audio evaluator and routes the assessment plus
+estimates to a bounded Kimi proposal; the revised v2 contract is offline-tested only.
+The legacy mic/agent loop here remains separate. Kimi receives text/state, not recordings;
+do not claim the planner listened when it received a summary.
 
 ## 3. Minimum new evaluator contract
 

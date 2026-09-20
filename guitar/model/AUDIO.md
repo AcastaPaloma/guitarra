@@ -1,141 +1,160 @@
-# Optional file-based audio evaluator
+# Baseten audio review — Inkling plus local measurements
 
-**Inkling on Baseten is the primary audio evaluator; a bounded Inkling Small fallback is
-acceptable to the operator.** Treat preview reliability separately from musical accuracy.
-The old full-model `audio_url` probe timed out after 30s on a one-second synthetic WAV;
-that was **not an access-denied response**. See [audio-connection-check.json](audio-connection-check.json).
+**Full Inkling is the primary evaluator; Inkling Small is the bounded fallback. All
+hosted audio inference stays on Baseten.** Kimi remains the text/state planner. No new
+model deployment, fine-tuning, camera or provider migration is needed.
 
-The [2026-09-20 access investigation](AUDIO_INVESTIGATION.md) authenticated successfully,
-confirmed **both models already added to the workspace**, and found existing Small token
-usage. Public docs support audio, but the authenticated catalog currently omits audio from
-both models' modality lists. These metadata checks do not settle the discrepancy or prove
-successful guitar assessment. A bounded, budget-approved inference probe remains pending.
-[Sanitized evidence](audio-access-check.json) contains no credentials or media. Kimi remains
-the text/state planner; no new model deployment or provider migration is proposed.
+## What is verified
 
-**Single-arm web integration now exists:** [arm_controller/REHEARSAL.md](../../arm_controller/REHEARSAL.md)
-uses a consented browser AudioWorklet to capture a bounded take, then calls this file
-adapter and feeds a valid assessment to a bounded Kimi revision proposal. It never
-replays automatically. Preliminary local pitch/onset metrics are computed first and fed
-to the planner, but **not yet to Inkling**. They have six reproducible known defects; see
-[the investigation and offline regressions](AUDIO_INVESTIGATION.md). The intended next step
-is confidence-aware local measurements plus the clip in Inkling's context, not replacing
-Inkling or treating deterministic estimates as infallible. No new live assessment or
-user-media upload is claimed here. The older `guitar/web` fake console and legacy recorder
-remain separate.
+The operator-approved **three-request / $0.10** synthetic diagnostic on 2026-09-20 passed:
 
-## The interface
+| Request | HTTP | Elapsed | Audio input tokens |
+|---|---:|---:|---:|
+| Full Inkling, text control | 200 | 0.485s | 0 |
+| Full Inkling, one-second generated WAV | 200 | 6.447s | 21 |
+| Inkling Small, the same WAV | 200 | 3.272s | 21 |
 
-`model/audio.py` reads **one operator-selected file**, validates it, converts it to a 16 kHz
-mono WAV, and optionally submits it to Baseten. `scripts/evaluate_audio.py` is the CLI.
-Neither module imports/opens robot drivers, cameras, microphones, or motion tools.
+Usage-based cost estimate: **$0.00175575**, using uncached catalog prices (not an invoice).
+All requests used `reasoning_effort="none"`, bounded output, and a 90s diagnostic timeout;
+none actually took 30s. **No fourth request** was made. [Sanitized live evidence](audio-inference-check.json).
 
-Accepted input: uncompressed **16-bit PCM WAV**, mono or stereo, nonempty and no longer
-than 160 seconds / 32 MiB. Common rates including 16, 44.1, and 48 kHz are supported.
-Other formats (M4A/MP3/float WAV/24-bit WAV) must be exported as PCM16 WAV first.
-Stereo is averaged and sample rates are converted with an antialiasing polyphase filter.
-There is no trimming, gain normalization, playback, or modification of the original file.
+This establishes current access and audio ingestion for those requests, not a definitive
+cause of the older 30s timeouts. Reasoning depth, preview serving/routing and test time
+all differed. The catalog's text/image-only metadata did **not** prevent audio inference.
 
-Preparation records source/upload hashes, sample rates, duration, preprocessing, and separate
-local signal-level estimates. The loader does **not** verify when/where a clip was recorded
-or whether its claimed attempt ID matches a real performance. Supply that provenance honestly.
-The new web manager separately binds one clip to a completed attempt/capture ID and
-stores browser sample-frame metadata. Its `browser_microphone` source label is a browser
-attestation, not independent device/provenance or hardware-timebase verification.
+**Quality remains limited:** the WAV contained two separated tones and no room noise.
+Neither model accurately described the two events, and both mentioned room noise. The
+old v1 coaching prompt also produced numeric scores despite having no performance target.
+Do not use the model as a pitch detector, stopwatch or calibrated quality reward.
 
-## Commands (repository root)
+The subsequent **v2 grounding/null-score contract and runtime changes below are offline
+verified**, not another live benchmark. This audio task used no real recording, microphone,
+camera, robot, deployment or training, and made no server restart. Useful real-guitar optimization
+still requires consented, supervised validation and the independent physical gates.
 
-```bash
-# On another environment, install these CPU-only extras:
-guitar/.venv/bin/python -m pip install 'jsonschema>=4.23,<5' 'numpy>=1.26,<3' 'scipy>=1.13,<2'
+## Current single-arm flow
 
-# Inspect a selected file locally. No .env reading, API request, or media upload.
-guitar/.venv/bin/python guitar/scripts/evaluate_audio.py \
-  --wav /path/to/take.wav --inspect
-
-# Explicit consent to upload THIS recording; primary + at most one Small fallback.
-guitar/.venv/bin/python guitar/scripts/evaluate_audio.py \
-  --wav /path/to/take.wav \
-  --attempt-id take-001 \
-  --expected 'Three A2 notes, approximately one second apart' \
-  --allow-upload
+```text
+completed take + validated browser WAV + plan + command telemetry
+                              |
+                  local acoustic estimates (v2)
+                              |
+        WAV + intended notes + estimates/uncertainty + capture quality
+                              |
+                   Inkling on Baseten
+                   (one Small fallback on transient failure)
+                              |
+           uncertain assessment + local estimates + bounded history
+                              |
+                     Kimi proposes a revision
+                              |
+          local validation + separate operator-approved next Play
 ```
 
-Use a short, already permissioned guitar recording (a hand-played clip is sufficient to
-start; no robot run is required). Describe the intended notes/timing, not what you assume
-actually sounded. Label generated inputs with `--source synthetic_fixture`.
+[`arm_controller/rehearsal.py`](../../arm_controller/rehearsal.py) passes the **same
+source-bound estimates to both Inkling and Kimi**. A source-WAV SHA256 prevents attaching
+another clip's measurements; nonfinite/oversized context is rejected before upload.
+Local failure is disclosed as unavailable, not fabricated missed notes. The last three
+attempts include compact, versioned acoustic summaries and reviewer identity, not old WAVs.
 
-The default report goes to ignored `guitar/runs/audio/<attempt-id>.json`; use `--output`
-to choose a new JSON path. Existing reports are not overwritten. A full-model transport
-failure can trigger one Small request, recorded as `model_fallback_from`; HTTP failures
-and invalid assessments are not retried. To intentionally re-assess a clip, preserve its attempt ID
-and choose a distinct output filename. Reports do not contain waveform/base64 bytes,
-local file paths, credentials, or private model reasoning. They do contain the intended
-phrase and assessment, so keep user-recording reports private unless sharing is approved.
+[`tap_audio_metrics.py`](../../arm_controller/tap_audio_metrics.py) detects energy rises
+once across the clip and assigns them monotonically, one-to-one, using event identities.
+It estimates independent monophonic pitch across several normalized-periodicity frames,
+with sub-sample interpolation and abstention for clipping, short/unstable signals, weak
+fundamental/octave ambiguity and semitone boundaries. Note identity is separate from
+cents/tuning tolerance. Missing telemetry remains unknown and never removes planned rows.
 
-## Separate configuration from the planner
+These are **heuristics**, not a qualified guitar classifier or calibrated confidence.
+Motor noise, overlapping/ringing strings and very quiet notes remain difficult. “Heard”
+in stored compatibility fields counts attack candidates, **not verified guitar notes**;
+the UI now labels them accordingly. “Clarity” is only level above estimated noise.
+
+### Timing limits
+
+Audio-relative onset positions/intervals are estimates within the recording. Browser,
+server and input-device latency are **uncalibrated**. Encoder-ready offsets are not string
+contact, rhythm error or command-to-sound delay. The current web plan has post-lift pauses,
+not an intended acoustic beat schedule; it explicitly sends `timing_target_available=false`
+even when DSP fails. Definitive timing-accuracy claims without that target are rejected.
+`timing_error_ms`, absolute delay and the old “jitter” score remain null. No model or local
+heuristic is permitted to invent a millisecond improvement or change mechanical limits.
+
+## File interface and configuration
+
+`model/audio.py` and `scripts/evaluate_audio.py` themselves open **no devices or motion tools**.
+Selected input must be nonempty uncompressed PCM16 WAV, mono/stereo, at most **160s / 32 MiB**.
+Common sample rates are supported; stereo is averaged and audio is polyphase-resampled to
+16kHz mono for Baseten. The original file is not changed, played, trimmed or gain-normalized.
+Source/upload hashes, processing, sample rates and separate signal estimates are recorded.
 
 ```dotenv
-# Existing planner stays unchanged:
 BASETEN_MODEL=moonshotai/Kimi-K3
-
-# Optional evaluator only. No capture or upload is enabled by these settings.
 BASETEN_AUDIO_MODEL=thinkingmachines/inkling
+BASETEN_AUDIO_REASONING_EFFORT=none
 BASETEN_AUDIO_TIMEOUT_S=30
 ```
 
-Both use `BASETEN_API_KEY` from the ignored `.env`. The evaluator sends a non-streaming
-request with high reasoning and a 4,096-token output budget. After a no-status transport
-failure/timeout from full Inkling it can make **one additional request to Inkling Small**,
-with the same timeout. This is existing source behavior, not a new change made by the
-investigation. The returned report names the actual model and fallback origin. HTTP errors,
-malformed assessments, and missing audio-token evidence do not currently trigger fallback.
-It never routes raw audio to Kimi or another provider. Raising the timeout also requires
-review of the web manager's total stage budget; do not silently outwait that deadline.
+Only the server/CLI reads `BASETEN_API_KEY` from ignored environment files. The audio-only
+reasoning default is now **none**, matching the successful diagnostic; the planner's
+reasoning setting is unchanged. Current audio output cap: **1,536 tokens**. No `.env`
+credential/settings edit or live server restart was performed by this audio task.
 
-## Assessment contract
+One evaluation permits **at most two requests**: primary, then one Small fallback for a
+transport failure or HTTP **408/429/500/502/503/504/529**. There is no same-model retry,
+recursive fallback, alternate provider, or raw-audio routing to Kimi. Auth/billing/input
+errors, invalid assessments and missing audio-token evidence do **not** trigger fallback.
 
-Successful, complete responses must satisfy a versioned JSON schema containing:
+The default per-request timeout is 30s. The evaluator has a **75s overall admission/result
+budget**, further limited by the web manager's remaining review time; it reserves time
+for fallback when capping a large configured timeout. Socket timeouts cannot cancel an
+already-billed request. Stop/deadline checks block further requests and discard late
+results, while the web watchdog remains independent. Each attempted model, failure class,
+HTTP status where available, usage and elapsed time is recorded under `requests`; a
+fallback report also has `model_fallback_from`. The UI shows the actual reviewer/fallback.
+Startup does not make a health probe or display the old timeout as current provider status.
 
-- `recording_quality`: usable / limited / unusable / uncertain.
-- `notes_match`, `timing_match`: consistent / inconsistent / uncertain / not_assessed.
-- `summary`, bounded `observations`, and mandatory `limitations`.
-- `score` (integer 0–10) and `suggestions` are currently required by the source schema.
-  This is an **uncalibrated model opinion**, not a deterministic quality score. The current
-  prompt's pressure to grade even uncertain audio is an investigation finding, not a
-  guarantee that a score is supported. Future contract work should permit abstention.
+Baseten recommends clips under two minutes for Small; the 160s local cap is longer than
+that best-results recommendation (not a claimed hard provider limit). Long-clip quality
+and latency remain unvalidated. Keep real validation takes short; no automatic clip
+chunking, extra requests or physical repeats are authorized by this software budget.
 
-The request has **no tools**. Tool calls, refusals, truncation, malformed JSON, extra fields,
-duplicate keys, and ratings from unusable audio are rejected. Positive audio-token usage
-must also be reported before the client marks an assessment as received. Missing usage
-keeps the audio path unverified rather than pretending the model heard the clip.
+## CLI (repository root)
 
-A successful report has `status: assessed`. This means a schema-valid model assessment was
-received, **not** that the guitar performance succeeded. On network/provider/response failure:
+```bash
+# Local validation only; no credentials, network, upload, playback or devices:
+guitar/.venv/bin/python guitar/scripts/evaluate_audio.py --wav /path/to/take.wav --inspect
 
-```json
-{"status": "unavailable", "assessment": null}
+# Explicit upload/inference consent: primary plus at most one Small fallback.
+guitar/.venv/bin/python guitar/scripts/evaluate_audio.py \
+  --wav /path/to/take.wav --attempt-id take-001 \
+  --expected 'Three A2 notes approximately one second apart' --allow-upload
 ```
 
-A timeout is not a negative music score and must not trigger a compensating motor action.
-Reports have `motion_authority: false` and `is_physical_qualification: false`.
+The CLI does not invent telemetry-bound per-note metrics for an arbitrary file. It sends
+file signal estimates plus the operator's intended phrase. The web manager supplies the
+per-note metrics and explicitly reports the absence of an acoustic timing target.
+Label generated clips `--source synthetic_fixture`. Default reports are ignored files
+under `guitar/runs/audio/`; select a new `--output` when intentionally re-assessing a clip.
+Existing reports are not overwritten. Never share recordings/reports without permission.
 
-## What is still next
+## v2 assessment contract
 
-1. Run the bounded, approved Baseten diagnostic to distinguish preview access, request
-   handling, and latency. Workspace addition/authentication are already confirmed;
-   metadata alone is not an audio inference test.
-2. Fix/qualify the local measurements, pass them to Inkling with uncertainty, then assess
-   a short consented recording and review its usefulness with the operator.
-3. Review the new single-arm web ingestion of assessments as **untrusted data**, with separate
-   telemetry and explicit operator approval of locally validated proposals. It is not wired
-   into the older CLI/two-arm runner and cannot automatically replay a robot.
-4. Qualify the relevant physical subset and independently review protection/stop behavior
-   before any real supervised web take; the current pulled keypoint file is empty.
+Required fields: `recording_quality`, `notes_match`, `timing_match`, `summary`,
+`observations`, `limitations`, `score`, `suggestions`. `score` is now **integer 0–10 or
+null**. Unusable/uncertain capture or both accuracy fields being unassessed requires null,
+not zero. A non-null score is still an **uncalibrated model opinion**, not a reward or
+proof of improvement. Prompts no longer instruct the model to prefer grading over uncertainty.
 
-This file adapter itself still opens no devices and executes no motor commands. Browser
-capture/export and review orchestration live in `arm_controller/`, not in this module.
-No live acoustic qualification or proven physical improvement is established. Camera remains off.
-See [DESIGN.md](../DESIGN.md), [REHEARSAL_LOOP.md](../REHEARSAL_LOOP.md), and [AGENTS.md](../../AGENTS.md).
+Only complete, tool-free, schema-valid JSON with positive audio-input-token usage is
+accepted. Refusals, truncation, extra/duplicate keys, unsupported accuracy claims and
+malformed responses produce `status: unavailable`, `assessment: null`. No compensating
+motion follows an API or capture failure. The evaluator and planner must preserve
+uncertainty and flag disagreements rather than automatically trusting either the model
+or DSP. Mechanical diagnosis, grip/torque/calibration/clearance changes and automatic
+replay remain prohibited. Human preference stays separate from model judgment.
 
-[Baseten audio request requirements](https://docs.baseten.co/inference/model-apis/audio)
+See [investigation/history](AUDIO_INVESTIGATION.md), [current status](../STATUS.md),
+[supervised rehearsal](../../arm_controller/REHEARSAL.md), [physical path gates](../../arm_controller/PATHS.md)
+and [operator rules](../../AGENTS.md). Baseten references:
+[audio](https://docs.baseten.co/inference/model-apis/audio),
+[reasoning](https://docs.baseten.co/inference/model-apis/reasoning).

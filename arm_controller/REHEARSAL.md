@@ -33,18 +33,19 @@ They are available in this checkout's `guitar/.venv`; no driver/environment was
 recreated for this change. The old three-package `uv run` command alone is no
 longer sufficient for the audio adapter.
 
-**Two blockers were found in the pulled checkout, not repaired by software tests:**
+**Current readiness limits (connectivity is separate from physical/acoustic qualification):**
 
 1. The v4 `keyframes_arm2.json` contains **25 contact keys, zero per-key hovers**,
    and no lift-first qualification. Note planning is possible; motion is not.
    Record/review a small set of actual contact/hover pairs and directed transit
    paths with the operator after resolving physical/thermal gates. No backup,
    old fret map, arbitrary offset, interpolation, or XYZ estimate replaces that review.
-2. The separate Baseten audio adapter targets `thinkingmachines/inkling` by default.
-   Its last recorded live probe **timed out**; no successful live listening/guitar
-   assessment is established. This integration has not made another paid probe or
-   uploaded real media. Configuration alone is not endpoint verification. See
-   [audio setup](../guitar/model/AUDIO.md).
+2. **Inkling access now works:** an approved three-call/$0.10 synthetic check passed
+   full-model text/audio and Small audio, with positive audio-input tokens. Estimated
+   usage cost was $0.00175575. This does not establish accurate guitar critique: both
+   models misdescribed the generated tones. Local DSP v2 now supports the model; the
+   revised grounded feedback contract is offline-tested, not real-guitar-qualified.
+   No real media was uploaded. See [audio setup/evidence](../guitar/model/AUDIO.md).
 
 Before any physical test, resolve the applicable operator/thermal/stop gates and
 check the actual serial-port mapping. This work does **not** qualify motion,
@@ -77,14 +78,14 @@ Reusing it creates a **new capture ID/take**, checks the current calibration fin
 and still requires confirmation. Expired proposals and interrupted/faulted execution
 cannot become resumable motion programs. A changed phrase can start a new session.
 
-The planner gets a bounded **last-three-attempt textual history**, not past raw WAVs
-or private model reasoning. It can avoid repeating prior unhelpful choices; this is
-context/plan refinement, not weight training. “★ preferred” is a persisted **human
+The planner gets a bounded **last-three-attempt textual history**, including compact
+versioned acoustic summaries and reviewer identity, not past raw WAVs or private reasoning.
+It can avoid repeating prior unhelpful choices; this is context/plan refinement, not weight training. “★ preferred” is a persisted **human
 judgment**, not automatic best-plan selection or physical qualification.
 
 The chart compares command durations only for the same pitch order and calibration.
-Audio judgments (notes/timing/recording quality) remain separate categorical assessments;
-there is no invented numerical quality/improvement score or claim every take gets better.
+Audio judgments and local acoustic estimates remain separate. A nullable 0–10 model
+opinion is not a calibrated quality/improvement score or a claim every take gets better.
 Changed musical ordering/calibration is explicitly not time-compared against the baseline.
 
 ## Operator flow
@@ -109,12 +110,16 @@ Changed musical ordering/calibration is explicitly not time-compared against the
    There is no per-note model request. Recording continues through completion and
    a 350ms ringing tail, then closes **all** microphone tracks/context.
 5. After normal disconnect, upload this attempt's mono PCM16 WAV to the local server.
-   The existing adapter validates/resamples it to 16kHz and makes **one** consented
-   Baseten audio request. No WAV/base64 is passed to Kimi or included in JSON logs.
-6. If the assessment has usable/limited evidence, Kimi receives it explicitly as
-   **untrusted data**, separately from command/encoder telemetry, and proposes at
-   most one bounded adjustment. Unavailable/unusable/uncertain audio yields inspection
-   or unavailable feedback, not a bad-note score or compensating movement.
+   Local DSP computes source-bound pitch/attack estimates with explicit unknowns. The
+   adapter sends the 16kHz clip, expected phrase, capture quality and estimates to
+   **Inkling, with at most one logged Small fallback** on a transient failure. No
+   WAV/base64 is passed to Kimi or included in JSON reports.
+6. Kimi receives the assessment as **untrusted data**, with local estimates, bounded
+   history and separate command/encoder telemetry, and proposes at most one bounded
+   adjustment. Unavailable/unusable audio produces no bad-note score or compensating
+   movement. Uncertain evidence may reach the planner with a null score and caveats;
+   it should prefer keep/inspect rather than invent precision. Estimates and model
+   opinion can both be wrong; disagreements require inspection.
 7. The page shows the actual clip, concise assessment, and exact proposed diff;
    full observations/limitations/telemetry are under Take details. The next proposal
    is staged. **Play Next Take** confirms that next plan; “keep the previous tuning”
@@ -198,10 +203,12 @@ coordinates/audio cannot establish swept clearance or resolve the thermal gates.
   sustained thermal use. Motor 12 is never commanded: no all-motors torque-off, grip
   opening, or grip reassertion. The standalone close default is unchanged.
 - During network inference, Stop discards late results and blocks further requests
-  or dispatch. It cannot cancel an already-billed provider request. No automatic
-  provider/model retry/fallback. Default audio timeout is 30s; text revision uses
-  60s. The audio adapter's environment timeout remains configurable; a late response
-  beyond the local stage deadline is discarded rather than authorizing motion.
+  or dispatch. It cannot cancel an already-billed request. Audio defaults to no extra
+  reasoning, 30s per request, and at most one Small fallback for transient errors,
+  within a 75s admission/result budget further capped by the remaining review stage.
+  Auth/billing/input/assessment failures do not trigger fallback. Every attempted
+  model/failure is recorded and the UI names the reviewer. Text revision uses 60s.
+  No API failure or late result authorizes motion. See [AUDIO.md](../guitar/model/AUDIO.md).
 - Browser refresh/server restart never resumes a take or pairs it with an old clip.
   Another page can explicitly request Stop but does not adopt the recording lease.
 
@@ -243,6 +250,13 @@ Do not tunnel or bind it to the LAN without a separate security review.
 
 ## Offline verification (not a physical or model-quality qualification)
 
+Latest combined source check after audio v2: **340 Python tests passed**, three Node
+capture checks and JS syntax checking passed. Six former DSP expected failures are now
+ordinary regressions. The three approved **live synthetic v1 API calls** are separate
+connectivity evidence, not validation of the revised v2 contract or real guitar playing.
+The original browser/implementation fixture results below are retained as history;
+[STATUS.md](../guitar/STATUS.md) distinguishes subsequent motion and audio work.
+
 ```bash
 guitar/.venv/bin/python -m pytest arm_controller/tests guitar/tests -q
 node --test arm_controller/tests/capture.test.mjs
@@ -250,8 +264,8 @@ node --test arm_controller/tests/capture.test.mjs
 guitar/.venv/bin/python arm_controller/tests/browser_check.py
 ```
 
-Current result: **188 Python checks passed** (67 new + 121 existing). Tests prevent
-real serial/provider access and cover bounded proposals, schema rejection,
+Original implementation result: **188 Python checks passed** (67 new + 121 existing).
+Those tests prevent real serial/provider access and cover bounded proposals, schema rejection,
 recording identity/completeness, no replay, late-result cancellation, source
 freshness, ownership/lease/attempt budgets, local HTTP consent/security, gripper
 exclusion, body-only cleanup, encoder-timeout propagation, persistent sessions/favorites,
@@ -270,6 +284,8 @@ ended; no JavaScript errors or desktop/mobile horizontal overflow. Evidence/scre
 `guitar/runs/tap-browser-check.json` and `tap-browser-check-{play,history}-{1100,390}.png`. These are labeled **offline fixtures**, not
 robot audio, Baseten assessments, or physical timing measurements.
 
-No real arm, camera, microphone, paid inference, deployment, or training was exercised
-by this implementation verification. A consented live audio endpoint check and a
-separately approved supervised physical take are still required.
+Those original implementation fixtures used no real arm, camera, microphone, paid
+inference, deployment or training. The later approved synthetic API check established
+current Inkling/Small access, not useful guitar optimization. The revised v2 contract
+and a consented real recording still need end-to-end acoustic validation; any physical
+take separately requires the operator/path/thermal gates.

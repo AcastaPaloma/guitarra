@@ -94,13 +94,16 @@ These checks are not a physical safety certificate or an independent hardware wa
 - The optional **file-based evaluator is now implemented** in `audio.py`, with explicit
   upload consent, PCM16 WAV validation/resampling, a bounded assessment schema, and no tools.
   It is not automatically invoked by the planner or legacy mic loop.
-- Full `thinkingmachines/inkling` remains the separate audio candidate. Its documented audio
-  request **still timed out**, including a one-second synthetic WAV probe. Live audio ingestion
-  and guitar critique are not verified; failures return `status: unavailable, assessment: null`.
-  No automatic fallback is configured.
-- See [AUDIO.md](AUDIO.md) for local inspection/upload commands. A selected real recording,
-  a responding endpoint, assessment review, and deliberate planner integration are still needed.
-  ASR is not guitar critique.
+- Full `thinkingmachines/inkling` is the primary audio reviewer with one bounded Small
+  fallback for transient errors. An approved three-call/$0.10 synthetic check passed
+  full text/audio and Small audio with reasoning disabled; both audio calls reported
+  audio-token usage. [Evidence](audio-inference-check.json). The old timeout is historical,
+  not proof of denied access; real-guitar accuracy/optimization remains unvalidated.
+- The single-arm web loop now feeds source-bound local pitch/onset estimates to **both**
+  Inkling and Kimi. v2 permits unknown/null scores and keeps timing uncertainty explicit.
+  This revised contract was tested offline after the live v1 probe, not with another
+  recording or paid call. See [AUDIO.md](AUDIO.md) for limits, commands and validation
+  boundaries. ASR and fluent model feedback are not validated guitar critique.
 
 ## Files and the older scaffold
 
@@ -110,7 +113,7 @@ These checks are not a physical safety certificate or an independent hardware wa
 | `../agent/backends/baseten.py` | Active planner adapter: native tools, argument validation, continuation |
 | `../scripts/baseten_setup.py` | Status, catalog lookup, and synthetic connection check |
 | `audio.py`, `../scripts/evaluate_audio.py` | Opt-in WAV evaluator; file normalization and structured feedback, no device access |
-| `AUDIO.md`, `audio-connection-check.json` | Audio setup and truthful record of the timed-out synthetic audio probe |
+| `AUDIO.md`, `audio-inference-check.json` | Current grounded audio setup and successful, explicitly synthetic connectivity evidence; the older `audio-connection-check.json` timeout is retained as history |
 | `connection-check.json` | Non-secret evidence of the live synthetic tool round trip |
 | `MODEL_SELECTION.md` | Current quality-first selection and capability boundaries |
 | `baseten_guitar_agent/` | **Inactive, unvalidated** Qwen2.5-7B custom Truss recipe retained for reference |

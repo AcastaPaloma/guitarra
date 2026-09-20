@@ -124,11 +124,13 @@ Device access/media upload still require approval. Read [agent/README.md](agent/
 
 The normal path needs state/text plus available audio feedback, not a vision model. Current
 microphone code provides local heuristics. A separate [file-based evaluator](model/AUDIO.md)
-provides explicit WAV upload and a bounded assessment interface, but its last Inkling probe
-timed out. The single-arm `arm_controller/` web app now wires browser capture/export and a
-bounded planner proposal to that adapter, with persistent session/audio/tuning history and
-operator-started Next Take. This is offline-tested, not live-qualified. The
-older CLI/fake orchestration still lacks that integration; live assessment verification remains.
+provides explicit WAV upload and a bounded assessment interface. Approved synthetic checks
+now verify full Inkling and Small audio access with reasoning disabled; they do **not**
+qualify guitar critique. The single-arm `arm_controller/` app feeds the clip and local
+confidence-aware pitch/onset estimates to Inkling, then a bounded proposal to Kimi, with
+persistent session/audio/tuning history and operator-started Next Take. The revised v2
+feedback contract is offline-tested, not real-guitar-qualified. The older CLI/fake
+orchestration still lacks that integration; supervised acoustic validation remains.
 The configured Kimi planner cannot accept raw microphone audio. See
 [sense/README.md](sense/README.md). No training dataset is needed for the rehearsal loop.
 

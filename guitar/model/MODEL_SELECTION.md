@@ -31,24 +31,28 @@ safety limits, or executable code. Local code remains authoritative. There is no
 |---|---|
 | Text/state planner | **Kimi K3, live synthetic tool round trip verified** |
 | Camera | Off by default and unnecessary. Kimi supports optional images, but this was not exercised. |
-| Local audio estimates | Existing mic/scorer may provide text summaries; not raw-audio understanding. |
-| Raw-audio evaluator | Inkling on Baseten remains primary; Small is an accepted bounded fallback. Single-arm web integration exists; acoustic quality remains unverified. The old full-model probe timed out, but current authenticated metadata confirms both models are already in the workspace. See [investigation](AUDIO_INVESTIGATION.md). |
+| Local audio estimates | Web DSP v2 supplies source-bound, uncertainty-aware pitch/onset estimates to Inkling and Kimi; legacy mic/scorer remains separate. These are heuristics, not verified contact or timing accuracy. |
+| Raw-audio evaluator | **Inkling on Baseten remains primary; Small is a bounded fallback.** Both passed approved synthetic audio requests with audio-token usage. Real guitar critique/optimization remains unvalidated. See [live evidence](audio-inference-check.json). |
 
 Full `thinkingmachines/inkling` (not Small) was initially selected for combined reasoning
 and documented audio support, but both normal and streaming inference requests timed out.
 Kimi K3 then returned native tool calls successfully. This was connectivity troubleshooting,
-not an accuracy bake-off or proof of an entitlement denial. The **audio adapter now has
-one Small fallback after a full-model transport timeout**; Kimi's planner choice is separate.
-The operator explicitly accepts that fallback and wants all hosted inference on Baseten.
-No replacement deployment is proposed by the current audio investigation.
+not an accuracy bake-off or proof of an entitlement denial. A later approved synthetic
+probe succeeded for full Inkling text/audio and Small audio with reasoning disabled;
+the old timeout cause remains unproven. The audio adapter now defaults to that reasoning
+setting and permits one Small fallback for transient failures within a bounded review.
+Kimi's planner choice is separate. The operator accepts fallback and wants all hosted
+inference on Baseten; no replacement deployment is proposed.
 
 Kimi K3 itself is not a raw-audio model on the current Baseten surface. The separate
 [file-based evaluator](AUDIO.md) implements consented requests with no motion tools,
 validates PCM16 WAV files and resamples them to the documented 16 kHz input. The active
 single-arm web app captures/exports browser audio and ingests the assessment; the legacy
-CLI remains separate. Preliminary local pitch/onset estimates reach Kimi, not yet Inkling,
-and have documented regression failures. Neither an accepted WAV nor a fluent explanation
-proves accurate note-quality assessment or a mechanical diagnosis.
+CLI remains separate. Local pitch/onset estimates now reach both models, and the six
+original DSP failures are passing regressions. The v2 grounding/null-score contract was
+verified offline after the live v1 probe; no fourth request or real guitar review was
+made. Neither an accepted WAV nor a fluent explanation proves note-quality accuracy or
+mechanical diagnosis.
 
 ## Evidence and limits
 

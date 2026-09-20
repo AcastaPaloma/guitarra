@@ -3,35 +3,52 @@
 **Source/status snapshot, not a physical qualification report.** Requirements are in
 [DESIGN.md](DESIGN.md); operator facts/overrides remain in [../AGENTS.md](../AGENTS.md).
 The pulled single-arm tap web app is now the active web milestone; it is **not** the
-older fake/two-arm console. Camera remains off. No deployment, training, real motion,
-real microphone, or live inference was exercised by the new implementation checks.
+older fake/two-arm console. Camera remains off. No deployment, training, real motion
+or real microphone was exercised by the checks below. The separately approved synthetic
+Baseten inference probe and its limits are distinguished from offline implementation tests.
 
-### Audio investigation addendum (2026-09-20)
+### Audio implementation follow-up (2026-09-20)
 
-The operator wants **Baseten only, preview Inkling primary, an acceptable bounded Small
-fallback, and local pitch/timing estimates supporting the qualitative model review**.
-[Investigation](model/AUDIO_INVESTIGATION.md) and [sanitized access evidence](model/audio-access-check.json)
-supersede older audio-specific claims below about absent fallback or assumed lack of access.
+**Baseten only; full preview Inkling primary, bounded Small fallback; local estimates
+support qualitative review.** [Current interface](model/AUDIO.md), [investigation/history](model/AUDIO_INVESTIGATION.md)
+and [sanitized live evidence](model/audio-inference-check.json) supersede older audio
+snapshots below about failed access, missing grounding, and no fallback.
 
-- Authenticated catalog/management/usage GETs succeeded; **both Inkling models are already
-  added to the workspace**. Existing workspace usage shows returned tokens for Small,
-  zero tokens recorded for eight full-model requests in the queried window. These are
-  workspace aggregates, not proof of audio processing or this app's assessment quality.
-- The old full-model audio probe was a **30s timeout, not HTTP 401/403**. Public audio docs
-  and authenticated modality metadata disagree. No new inference was made; a bounded
-  budget-approved synthetic probe is still needed to identify the actual serving failure.
-- Current source already has one Small fallback after a full-model transport timeout,
-  a required 0–10 coach score, and preliminary local pitch/onset metrics. Those metrics
-  reach **Kimi only, not Inkling**, and have six reproducible defects. Do not treat their
-  reproducibility, a fluent score, or the UI's “heard/jitter” labels as acoustic truth.
-- Added device/network-free DSP regression cases: **5 passed, 6 strict expected failures**
-  documenting unfixed defects. The initially checked evaluator/rehearsal/plan suites had
-  **64 passes, 2 pre-existing failures** from duration/schema fixture drift. These are
-  investigation snapshots, not a new full-suite or hardware qualification.
-- Only tests, documentation and sanitized metadata evidence changed in this investigation.
-  No runtime fix, settings change, deployment, recording upload/device access, live model
-  call, server restart, or physical qualification occurred. Other in-progress source work
-  remains separate; the older source snapshots below are not a claim it was re-audited.
+- The operator approved **three synthetic inference requests within $0.10**. All returned
+  HTTP 200 with reasoning disabled: full text **0.485s**, full audio **6.447s**, Small audio
+  **3.272s**. Both audio responses reported **21 audio-input tokens** and passed the v1
+  schema used for the probe. Usage-based uncached-price estimate: **$0.00175575**, not an
+  invoice. No fourth request. Current access works; the older timeout cause is unproven,
+  not an established entitlement denial. Catalog modality metadata did not block audio.
+- **Connectivity is not musical accuracy.** The one-second generated clip had two tones
+  and no room noise; neither model described both, and both mentioned room noise. The
+  old prompt also elicited targetless numeric grades. This was not real guitar audio.
+- Runtime source now uses audio-only reasoning default **none**, a 1,536-token cap, at
+  most primary + one logged Small fallback for transient failures, and a **75s** review
+  admission/result budget capped further by the caller's remaining time. Stop/deadline
+  checks prevent further calls and discard late results. Auth/billing/input/assessment
+  errors do not trigger alternate-model shopping. Socket timeouts do not cancel billing.
+- DSP v2 fixes all six reproduced regressions: energy rises instead of sustained-level
+  “onsets,” one-to-one event assignment, preserved plan/event identity, separate note
+  identity/tuning cents, and octave ambiguity. Multiframe periodicity, clipping, short/
+  unstable signal and note-boundary gates can abstain. These remain unqualified acoustic
+  heuristics; no string-contact, calibrated confidence or absolute-delay claim is made.
+- Source-WAV-hash-bound estimates and capture quality now reach **Inkling and Kimi**;
+  compact versioned summaries/reviewer identity reach bounded history. Unknown evidence
+  stays unknown. Current plans explicitly lack acoustic timing targets, even on DSP
+  failure; unsupported timing claims are rejected and delay/rhythm-error/jitter remain
+  unavailable. v2 permits null scores instead of forcing grades on unassessable evidence.
+- UI labels attack candidates and uncalibrated model opinion, displays reviewer/fallback
+  failures, and no longer presents the old timeout warning as current endpoint health.
+- **Verification:** current combined `arm_controller/tests` + `guitar/tests` passed
+  **340 Python checks** with no expected failures; three Node capture checks and JS syntax
+  checking passed. The old DSP xfails are normal regressions now; duration/schema fixtures
+  match the current contract. Two dependency-deprecation warnings remain, not test failures.
+- **The revised v2 contract/feedback loop was verified offline only after the three live
+  v1 probes.** No real recording, microphone/camera, motion, deployment, training or
+  physical improvement was tested. This audio task made no credential/environment edit,
+  hardware change or server restart. Concurrent motion/merge work below is separate;
+  existing operator/thermal/path gates and separate approval of each next take remain.
 
 ## Current motion correction: lift-first tap routes + explicit arm ownership
 

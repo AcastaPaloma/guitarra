@@ -1,17 +1,62 @@
 # Audio assessment and Inkling access investigation — 2026-09-20
 
-**Investigation, not a runtime fix or physical qualification.** Operator direction:
+**Initial investigation plus the approved follow-up below; not physical qualification.** Operator direction:
 keep inference on **Baseten**, keep preview **Inkling as primary**, accept a bounded,
 visible fallback when needed, and support its qualitative assessment with local
 pitch/timing estimates. Imperfect model judgment is acceptable; fabricated precision
 or confident conclusions from missing evidence are not. No new hosted model, training,
 or GPU deployment is needed for the next step.
 
-Changes made here are documentation, sanitized access evidence, and offline regression
-cases. No model settings, credentials, motors, capture behavior, or live server were
-changed/restarted. Other in-progress arm/planner/orchestration work was left alone.
+The initial investigation changed only documentation/evidence and offline regressions.
+The later follow-up changes audio-review/DSP source; this audio task leaves credentials,
+motors, capture and the live server untouched. Concurrent arm/planner/orchestration work is preserved.
 
-## 1. Access: what we actually established
+## Follow-up: approved probe and software corrections
+
+The operator approved **three synthetic calls within $0.10**. All succeeded with
+`reasoning_effort=none`: full text **0.485s**, full audio **6.447s**, Small audio **3.272s**,
+HTTP 200 throughout. Both audio responses reported **21 audio-input tokens** and passed
+the then-current v1 schema. Usage-based cost estimate **$0.00175575** (uncached prices,
+not an invoice); no fourth request. [Live evidence](audio-inference-check.json).
+
+**Access works now.** The earlier timeout cause remains unproven; no controlled high/none
+comparison was performed. The metadata omission did not block actual audio ingestion.
+Quality was poor on event detail: the fixture had **two tones and no room noise**, but
+neither model described both and both mentioned room noise. Their targetless scores were
+also unjustified. This validates the need for local measurement/uncertainty, not a new
+hosting platform or a claim that a successful response is useful guitar optimization.
+
+Follow-up source changes (see [current interface](AUDIO.md)):
+
+- Inkling remains primary, now defaulting to the successful `none` reasoning setting;
+  audio output cap 1,536 tokens. A logged, at-most-one Small fallback handles transient
+  transport/HTTP errors, not auth/billing/input/assessment failures. A 75s admission/result
+  budget, caller's remaining deadline and Stop gate future requests and discard late results.
+- Local DSP v2 detects energy rises once, assigns candidates monotonically one-to-one,
+  preserves plan/event identity, and uses multiframe normalized periodicity with octave,
+  boundary, clipping, length and stability guards. Note identity and tuning cents are
+  separate. All six original expected failures below became ordinary passing regressions.
+- Clip SHA-bound estimates and capture quality now reach **Inkling and Kimi**, with
+  explicit unknowns/limitations. Compact versioned summaries also reach history. The web
+  supplies `timing_target_available=false` even on DSP failure; unsupported timing accuracy
+  is rejected. No absolute delay/rhythm-error/jitter score is fabricated.
+- v2 permits null model scores and rejects scores on unassessable evidence. Prompts no
+  longer force grading or unconditional trust in DSP. UI labels candidate attacks, model
+  opinion and the actual reviewer/fallback, rather than treating them as ground truth.
+  The hardcoded historical timeout warning was replaced with a truthful configuration notice.
+
+**The new v2 request contract/feedback loop was tested offline only after those three
+calls.** This audio task performed no fourth inference, real recording, device access,
+deployment, training, server restart or physical optimization. Real tone/overlap/noise and calibrated timing
+remain validation work. Current test results are recorded in [STATUS.md](../STATUS.md).
+
+---
+
+**Historical initial findings below describe the pre-fix source and pre-probe state.**
+They explain the changes; pending-probe statements and strict-xfail counts below are not
+current status. No original failure evidence was overwritten.
+
+## 1. Access: what we initially established
 
 [Sanitized access evidence](audio-access-check.json) records authenticated **GETs only**
 to Baseten's inference catalog, management catalog, and existing model usage. No new
