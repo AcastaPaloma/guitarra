@@ -56,6 +56,32 @@ DEFAULT_RANGE = (0, 4095)
 GOTO_ACC = 30
 GOTO_SPEED = 600  # conservative speed for slider moves and keyframe playback
 
+REG_PRESENT_VOLTAGE = 62
+# STS3215 servos are 12V-class, and arm-1's first bus board died overheating:
+# every motion layer refuses to run if a servo reports a supply outside this
+# window. Software cannot stop a bad brick from frying hardware on contact —
+# the physical rule stays: ONLY the labeled 12V bricks, on either arm.
+SAFE_VOLTAGE_RANGE = (9.0, 12.6)
+
+
+def check_supply_voltage(bus, ids, safe=SAFE_VOLTAGE_RANGE):
+    """Raise before any motion if a servo reports an out-of-range supply.
+    Best-effort: buses that cannot report voltage (test doubles) pass."""
+    reader = getattr(bus, "_txrx", None)
+    if reader is None:
+        return
+    bad = {}
+    for sid in ids:
+        data = reader(sid, 0x02, [REG_PRESENT_VOLTAGE, 1], resp_extra=1)
+        if data is None:
+            continue
+        volts = data[0] / 10
+        if not safe[0] <= volts <= safe[1]:
+            bad[sid] = volts
+    if bad:
+        raise RuntimeError(f"UNSAFE SUPPLY VOLTAGE {bad}V (safe {safe[0]}-{safe[1]}V) "
+                           "— check the power brick; motion refused")
+
 
 class FeetechBus:
     def __init__(self, port, baud):
@@ -183,6 +209,14 @@ class App:
         else:
             missing = [sid for sid in MOTOR_IDS if sid not in alive]
             self.status.config(text=f"connected, MISSING {missing}", foreground="orange")
+        try:
+            check_supply_voltage(self.bus, alive)
+        except RuntimeError as exc:
+            messagebox.showerror("Supply voltage", str(exc))
+            self.status.config(text="UNSAFE VOLTAGE — fix the power brick", foreground="red")
+            self.bus.close()
+            self.bus = None
+            return
         self.torque_btn.config(state="normal")
         self.key_btn.config(state="normal")
         # reflect the servos' actual torque state (may be ON if a previous run was killed)

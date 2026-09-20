@@ -54,7 +54,7 @@ import re
 import time
 from pathlib import Path
 
-from app import FeetechBus
+from app import FeetechBus, check_supply_voltage
 from tap_arms import PRIMARY, ROW_OWNERS
 from tap_paths import (
     ACC, BODY_IDS, CLEARANCE_DWELL_S, PRESS_SPEED, PRESS_TOL, PROFILE,
@@ -195,6 +195,7 @@ class FretArm:
             alive = [sid for sid in MOTOR_IDS if self.bus.ping(sid)]
             if len(alive) < len(MOTOR_IDS):
                 raise RuntimeError(f"fret arm motors responding: {alive} of {MOTOR_IDS} — check power")
+            check_supply_voltage(self.bus, alive)  # refuse motion on a bad brick
             present = self._require_at("rest")  # no goal/torque write on unknown starting state
             self._check_halt()
             # Hold fresh positions, never re-enable torque against stale servo goals.
