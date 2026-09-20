@@ -62,6 +62,9 @@ class Key(StrictModel):
 class Note(Key):
     # A locally compiled pause AFTER the full tap/lift, not a desired acoustic onset.
     pause_ms: int = Field(default=DEFAULT_PAUSE_MS, ge=0, le=2000, multiple_of=50)
+    # Micro press-depth adjustment along the arm's own press axis, in raw counts
+    # (positive = deeper). Bounded well inside PRESS_TOL; recorded poses unchanged.
+    depth_counts: int = Field(default=0, ge=-20, le=20)
 
 
 # Retain legacy profile names to READ old records. The real registry admits
@@ -316,6 +319,10 @@ Propose at most ONE category of change, otherwise keep or request inspection:
 - ordering: swap ONE adjacent pair of existing events. This changes the arrangement;
   explain the musical tradeoff and require operator review. Never add/drop/duplicate notes.
 - positioning: choose ONE other RECORDED key of exactly the SAME pitch. No offsets or IK.
+- nudge: micro-adjust press depth on up to 3 notes via depth_counts (raw counts,
+  -20..20, positive = deeper; recorded poses stay untouched). Use when evidence
+  suggests a double-strike/bounce (go shallower) or a weak/silent press (go deeper).
+  This is the ONLY joint-level freedom you have; never invent other offsets.
 
 - path: only profiles in allowed_path_profiles can be selected. The live lift_first
   compiler always finishes lift to the current key's reviewed hover before selecting
@@ -397,6 +404,13 @@ def compile_revision(proposal: Proposal, plan: TapPlan, keys: set[tuple[int, int
             categories.add("timing")
             changes.append({"kind": "timing", "note_index": note.source_index,
                             "before_ms": old.pause_ms, "after_ms": note.pause_ms})
+        if note.depth_counts != old.depth_counts:
+            categories.add("nudge")
+            changes.append({"kind": "nudge", "note_index": note.source_index,
+                            "before_counts": old.depth_counts, "after_counts": note.depth_counts,
+                            "warning": "Press-depth micro-adjust; recorded poses unchanged"})
+    if sum(1 for c in changes if c["kind"] == "nudge") > 3:
+        raise ValueError("At most 3 notes may be depth-nudged per attempt")
     if len(categories) > 1:
         raise ValueError("Change only one category per attempt")
     if len(changes) > (3 if categories == {"timing"} else 1):

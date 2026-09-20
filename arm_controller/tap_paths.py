@@ -42,7 +42,7 @@ def motion_contract(body_ids: tuple[int, ...] = BODY_IDS) -> str:
     primary-arm contract; other arms' reviews hash to different values."""
     return hashlib.sha256(json.dumps({
         "schema": SCHEMA, "body_ids": tuple(body_ids),
-        "driver": "raw-goals-per-joint;release-then-shoulder-lift;lift-arrival-before-transit;no-rest-interior-v3",
+        "driver": "raw-goals-per-joint;release-then-shoulder-lift;lift-arrival-before-transit;plan-depth-nudge;no-rest-interior-v4",
         "travel_speed": TRAVEL_SPEED, "press_speed": PRESS_SPEED, "tap_speed": TAP_SPEED,
         "tap_dwell_s": TAP_DWELL_S, "acc": ACC, "settle_tol": SETTLE_TOL,
         "press_tol": PRESS_TOL, "settle_timeout": SETTLE_TIMEOUT,

@@ -261,7 +261,8 @@ def execute_take(plan, registry, stop_event, emit):
                 return False
             emit({"event": "note_start", "index": index, "arm": note_arms[index],
                   "string": note.string, "fret": note.fret, "shared_workspace": "guitar"})
-            result = arms[note_arms[index]].tap_key(note.string, note.fret, deadline=deadline)
+            result = arms[note_arms[index]].tap_key(note.string, note.fret, deadline=deadline,
+                                                    depth_counts=note.depth_counts)
             emit({"event": "note_end", "index": index, "arm": note_arms[index], "result": result})
             if index < len(plan.notes) - 1 and stop_event.wait(note.pause_ms / 1000):
                 return False

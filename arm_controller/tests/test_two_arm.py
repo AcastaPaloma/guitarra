@@ -265,7 +265,7 @@ class SeqArm:
         self.arm_id, self.log, self.halt, self.fail = arm_id, log, halt, fail
         self.kwargs = kwargs
 
-    def tap_key(self, string, fret_no, deadline=None):
+    def tap_key(self, string, fret_no, deadline=None, depth_counts=0):
         self.log.append((self.arm_id, "tap", string, fret_no))
         if self.fail == "fault":
             raise TimeoutError("Encoder arrival timed out; state uncertain")

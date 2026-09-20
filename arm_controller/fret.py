@@ -311,9 +311,10 @@ class FretArm:
         else:
             self._require_at(self.location)
 
-    def _named_stage(self, kind, name, speed, *, deadline=None, stages=None, started=None):
+    def _named_stage(self, kind, name, speed, *, deadline=None, stages=None, started=None,
+                     override=None):
         command = time.monotonic()
-        target = self.paths.pose(name)
+        target = override if override is not None else self.paths.pose(name)
         staged_lift = False
         if kind == "lift_clear":
             # Staged lift (operator directives 2026-09-20). Raising the shoulder
@@ -362,7 +363,7 @@ class FretArm:
 
     # ---- tools ----------------------------------------------------------
 
-    def tap_key(self, string, fret, *, deadline=None):
+    def tap_key(self, string, fret, *, deadline=None, depth_counts=0):
         """Own hover -> tap -> own hover; next key travels without neutral.
 
         The next stage cannot begin until the previous lift's continuous encoder
@@ -371,12 +372,26 @@ class FretArm:
         """
         if type(string) is not int or type(fret) is not int:
             raise ValueError("Key indices must be integers")
+        if type(depth_counts) is not int or not -20 <= depth_counts <= 20:
+            raise ValueError("depth_counts must be an integer within ±20")
         key = (string, fret)
         self._cell(*key)
         started, stages = time.monotonic(), []
         self._approach(key, deadline=deadline, stages=stages, started=started)
+        press_target = None
+        if depth_counts:
+            # Reviewed-plan micro-nudge: shift the press ALONG this arm's own
+            # press axis (the joint where hover and contact differ most), in
+            # the press direction. Bounded ±20 counts, inside PRESS_TOL; the
+            # reviewed poses themselves are never modified.
+            contact = self.paths.pose(contact_name(key))
+            hover = self.paths.pose(hover_name(key))
+            axis = max(contact, key=lambda j: abs(contact[j] - hover[j]))
+            direction = 1 if contact[axis] >= hover[axis] else -1
+            press_target = dict(contact)
+            press_target[axis] = max(0, min(4095, contact[axis] + direction * depth_counts))
         self._named_stage("tap", contact_name(key), TAP_SPEED, deadline=deadline,
-                          stages=stages, started=started)
+                          stages=stages, started=started, override=press_target)
         self.holding = key
         time.sleep(TAP_DWELL_S)
         self._lift(deadline=deadline, stages=stages, started=started)

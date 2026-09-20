@@ -50,7 +50,7 @@ class FakeArm:
     def __init__(self, *, halt=None, mode="ok", **_kwargs):
         self.halt, self.mode, self.calls = halt, mode, []
 
-    def tap_key(self, string, fret_no, deadline=None):
+    def tap_key(self, string, fret_no, deadline=None, depth_counts=0):
         self.calls.append(("tap", string, fret_no))
         if self.mode == "fault":
             raise TimeoutError("Encoder arrival timed out; state uncertain")

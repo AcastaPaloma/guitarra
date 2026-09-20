@@ -116,9 +116,10 @@ function selection() {
   const start = Math.trunc(Math.max(0, Math.min(arrangement.length - 1, (Number($('take-start').value) || 1) - 1)));
   const count = Math.trunc(Math.max(1, Math.min(config?.max_take_notes || 4, budgetFit(),
     arrangement.length - start, Number($('take-count').value) || 1)));
-  // beats are display-only; executable plans carry the compiled pause_ms.
+  // beats are display-only; executable plans carry pause_ms + depth nudges.
   return {start, count, notes: arrangement.slice(start, start + count)
-    .map(n => ({arm: n.arm, string: n.string, fret: n.fret, pause_ms: n.pause_ms}))};
+    .map(n => ({arm: n.arm, string: n.string, fret: n.fret, pause_ms: n.pause_ms,
+                depth_counts: n.depth_counts ?? 0}))};
 }
 
 function selectTake() {
@@ -132,8 +133,8 @@ function selectTake() {
     ? ` · capped at ${budgetFit()} notes by the ${config?.max_play_seconds || 150}s recording budget — play the rest as another take` : '';
   const pauses = notes.slice(0, -1).map(n => n.pause_ms);
   const pauseText = pauses.length === 0 ? ' · one tap'
-    : new Set(pauses).size === 1 ? ` · ${pauses[0]}ms pause after each lift`
-    : ' · pauses after lift: ' + pauses.join('ms / ') + 'ms';
+    : new Set(pauses).size === 1 ? ` · ${pauses[0]}ms pauses`
+    : ` · pauses ${Math.min(...pauses)}–${Math.max(...pauses)}ms`;
   $('selected').textContent = (parentId ? 'proposed · ' : '') + pathProfile.replace('_', '-') + pauseText + capped;
   void previewTrajectory(notes);
 }
@@ -152,8 +153,7 @@ async function previewTrajectory(notes) {
       return;
     }
     const trace = result.trajectory;
-    $('path-status').textContent = 'Lift → reviewed hover travel → tap → lift. No neutral between notes. ' +
-      `${trace.joint_travel_proxy_counts} counts travel proxy (not time or proof of clearance).`;
+    $('path-status').textContent = `Path OK · ${trace.joint_travel_proxy_counts} counts travel`;
     // Single-arm trajectories carry exit_route; two-arm ones carry per-arm exit_routes.
     const exits = trace.exit_route
       ? trace.exit_route.join(' → ')
@@ -171,7 +171,8 @@ async function previewTrajectory(notes) {
 
 function showArrangement(notes, title, profile, rhythm) {
   arrangement = notes.map(n => ({arm: n.arm || 'tap_primary', string: n.string, fret: n.fret,
-                                 pause_ms: n.pause_ms ?? 250, beats: n.beats}));
+                                 pause_ms: n.pause_ms ?? 250, beats: n.beats,
+                                 depth_counts: n.depth_counts ?? 0}));
   pathProfile = profile || defaultProfile();
   arrangementTitle = title;
   $('title').textContent = title + (rhythm?.tempo_bpm
@@ -381,9 +382,8 @@ function showProgress(record, offset) {
     node.className = 'note' + (index >= 0 && index < record.total ? ' selected' : '') +
       (record.phase === 'playing' && index === record.index ? ' now' : index >= 0 && index < record.completed_notes ? ' done' : '');
   });
-  $('telemetry').textContent = `${record.completed_notes}/${record.total} commands; outcome: ${record.playback_outcome}. ` +
-    (record.playback_elapsed_s !== undefined ? `Server command duration ${record.playback_elapsed_s.toFixed(2)}s. ` : '') +
-    'Encoder readiness is not proof of contact or an acoustic onset.';
+  $('telemetry').textContent = `${record.completed_notes}/${record.total} commands · ${record.playback_outcome}` +
+    (record.playback_elapsed_s !== undefined ? ` · ${record.playback_elapsed_s.toFixed(1)}s` : '');
 }
 
 function list(id, values) { $(id).replaceChildren(...values.map(text => textNode('li', text))); }
@@ -391,6 +391,7 @@ function changeText(change) {
   if (change.kind === 'timing') return `Note ${change.note_index + 1}: post-lift pause ${change.before_ms} → ${change.after_ms}ms`;
   if (change.kind === 'positioning') return `Note ${change.note_index + 1}: s${change.before.string}/f${change.before.fret} → s${change.after.string}/f${change.after.fret}, same pitch`;
   if (change.kind === 'path') return `Path staging ${change.before} → ${change.after}; same contact poses, shorter travels`;
+  if (change.kind === 'nudge') return `Note ${change.note_index + 1}: press depth ${change.before_counts} → ${change.after_counts} counts${change.after_counts > change.before_counts ? ' (deeper)' : ' (shallower)'}`;
   return `Order ${change.before.map(i => i + 1).join('–')} → ${change.after.map(i => i + 1).join('–')}. Changes the arrangement.`;
 }
 
@@ -622,6 +623,8 @@ function takeDiff(take, previous) {
         parts.push(`note ${i + 1}: s${a[i].string}f${a[i].fret} → s${b[i].string}f${b[i].fret}`);
       } else if (a[i].pause_ms !== b[i].pause_ms) {
         parts.push(`note ${i + 1}: pause ${a[i].pause_ms} → ${b[i].pause_ms}ms`);
+      } else if ((a[i].depth_counts ?? 0) !== (b[i].depth_counts ?? 0)) {
+        parts.push(`note ${i + 1}: depth ${a[i].depth_counts ?? 0} → ${b[i].depth_counts ?? 0}`);
       }
       if (parts.length > 5) { parts.push('…'); break; }
     }
