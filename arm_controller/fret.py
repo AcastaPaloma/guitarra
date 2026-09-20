@@ -307,14 +307,17 @@ class FretArm:
     def _named_stage(self, kind, name, speed, *, deadline=None, stages=None, started=None):
         command = time.monotonic()
         target = self.paths.pose(name)
-        shoulder_first = False
+        staged_lift = False
         if kind == "lift_clear":
-            # Operator directive 2026-09-20: the SHOULDER (ID 8) rises to its
-            # hover value and settles BEFORE any other joint gets a goal, so the
-            # fingertip leaves the string straight up instead of sweeping
-            # sideways while still low (stray plucks on neighboring strings).
-            # The interim goal set holds every other joint at its present
-            # encoder reading; endpoints are still the reviewed poses only.
+            # Staged lift (operator directives 2026-09-20). Raising the shoulder
+            # straight from a pressed contact pries the fingertip against the
+            # string it is pressing and can stall (observed: s5f2 timeout), so
+            # the lift is two-phase: (1) RELEASE the press — elbow/wrist-flex
+            # (9, 10) to their hover values, a short vertical un-press — then
+            # (2) the shoulder rises with the rest of the pose. Yaw/roll (7, 11)
+            # never move during either phase, so there is still no sideways
+            # sweep near the strings. Interim goals hold non-lifting joints at
+            # their present readings; endpoints remain the reviewed poses only.
             held = {}
             for sid in MOTOR_IDS:
                 for _ in range(5):
@@ -323,15 +326,16 @@ class FretArm:
                         held[sid] = p
                         break
             if set(held) == set(MOTOR_IDS):
-                shoulder_first = True
-                self._move({**held, 8: target[8]}, speed, deadline=deadline,
+                staged_lift = True
+                self._move({**held, 9: target[9], 10: target[10]}, speed,
+                           deadline=deadline, tol=PRESS_TOL,
                            settle_s=CLEARANCE_DWELL_S)
         self._move(target, speed, deadline=deadline,
                    tol=PRESS_TOL if kind in {"tap", "press"} else SETTLE_TOL,
                    settle_s=0 if kind in {"tap", "press"} else CLEARANCE_DWELL_S)
         self.location = name  # never advance symbolic state on timeout/fault
         if stages is not None:
-            stages.append({"stage": kind, "pose": name, "shoulder_first": shoulder_first,
+            stages.append({"stage": kind, "pose": name, "staged_lift": staged_lift,
                            "command_start_s": round(command - started, 4),
                            "encoder_ready_s": round(time.monotonic() - started, 4)})
 

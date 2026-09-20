@@ -77,8 +77,9 @@ def test_disconnected_hover_graph_never_falls_back_to_rest_before_next_key():
 
 
 def shoulder_first(arm, contact, hover):
-    """Interim goal set of a lift: every joint held, ONLY the shoulder raised."""
-    return {**arm.paths.pose(contact), 8: arm.paths.pose(hover)[8]}
+    """Interim goal set of a lift: press RELEASED (9, 10) before the shoulder rises."""
+    hover_pose = arm.paths.pose(hover)
+    return {**arm.paths.pose(contact), 9: hover_pose[9], 10: hover_pose[10]}
 
 
 @pytest.mark.parametrize("next_key", [(1, 2), (2, 1)])  # changed fret AND neighboring string
@@ -95,7 +96,7 @@ def test_actual_taps_lift_current_key_then_travel_then_lower_no_neutral(monkeypa
     ]
     assert all(p != arm.rest_pose for p in moves)
     assert moves[1][7] == moves[2][7] == moves[3][7]  # yaw untouched through the whole lift
-    assert moves[2] == {**moves[1], 8: moves[3][8]}   # shoulder rises before any other joint
+    assert moves[2] == {**moves[1], 9: moves[3][9], 10: moves[3][10]}  # press released first, shoulder after
     assert first["stages"][-1]["pose"] == "hover-r1-c1"
     assert second["stages"][0]["pose"] == hover_name(next_key)
     assert clock.now >= 4 * fret.CLEARANCE_DWELL_S
