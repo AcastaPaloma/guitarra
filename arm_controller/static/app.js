@@ -127,7 +127,7 @@ function selectTake() {
   const {start, count, notes} = selection();
   $('take-start').value = start + 1; $('take-count').value = count;
   document.querySelectorAll('.note').forEach((node, index) => {
-    node.className = 'note' + (index >= start && index < start + count ? ' selected' : '');
+    node.classList.toggle('selected', index >= start && index < start + count);
   });
   const capped = arrangement.length > budgetFit() && count >= budgetFit()
     ? ` · capped at ${budgetFit()} notes by the ${config?.max_play_seconds || 150}s recording budget — play the rest as another take` : '';
@@ -169,10 +169,21 @@ async function previewTrajectory(notes) {
   }
 }
 
-function showArrangement(notes, title, profile, rhythm) {
+function shortChange(change) {
+  if (change.kind === 'timing') return `pause ${change.before_ms}→${change.after_ms}ms`;
+  if (change.kind === 'nudge') return `depth ${change.before_counts}→${change.after_counts}`;
+  if (change.kind === 'positioning') return `was s${change.before.string}f${change.before.fret}`;
+  return change.kind;
+}
+
+function showArrangement(notes, title, profile, rhythm, changes) {
   arrangement = notes.map(n => ({arm: n.arm || 'tap_primary', string: n.string, fret: n.fret,
                                  pause_ms: n.pause_ms ?? 250, beats: n.beats,
                                  depth_counts: n.depth_counts ?? 0}));
+  const changeByIndex = {};
+  for (const change of changes || []) {
+    if (typeof change.note_index === 'number') changeByIndex[change.note_index] = change;
+  }
   pathProfile = profile || defaultProfile();
   arrangementTitle = title;
   $('title').textContent = title + (rhythm?.tempo_bpm
@@ -183,6 +194,10 @@ function showArrangement(notes, title, profile, rhythm) {
     const node = textNode('div', '', 'note');
     const beats = beatsVary && typeof n.beats === 'number' ? ` · ${n.beats}♪` : '';
     node.append(textNode('b', `s${n.string}·f${n.fret}`), textNode('span', `${i + 1}. ${pitch(n)} · ${n.arm}${beats}`));
+    if (changeByIndex[i]) {
+      node.classList.add('changed');
+      node.append(textNode('span', `Δ ${shortChange(changeByIndex[i])}`, 'delta'));
+    }
     return node;
   }));
   $('take-start').max = arrangement.length; $('take-start').value = 1;
@@ -524,7 +539,8 @@ async function runTake() {
       parentId = proposed ? current.attempt_id : null;
       sourceId = proposed ? null : current.attempt_id;
       showArrangement(proposed ? current.revision.plan.notes : current.plan.notes, arrangementTitle,
-                      proposed ? current.revision.plan.path_profile : current.plan.path_profile);
+                      proposed ? current.revision.plan.path_profile : current.plan.path_profile,
+                      null, proposed ? current.revision.changes : null);
     }
     running = false;
     if (sessionId) await refreshHistory(sessionId).catch(() => {});
@@ -538,8 +554,9 @@ async function runTake() {
 $('apply').onclick = () => {
   if (lastReview?.phase !== 'review_ready') return;
   parentId = lastReview.attempt_id; sourceId = null;
-  showArrangement(lastReview.revision.plan.notes, arrangementTitle, lastReview.revision.plan.path_profile);
-  say('Proposed tuning staged. Start only after inspection/confirmation.');
+  showArrangement(lastReview.revision.plan.notes, arrangementTitle, lastReview.revision.plan.path_profile,
+                  null, lastReview.revision.changes);
+  say('Proposed tuning staged — changed notes are highlighted. Start after inspection.');
   confirmTake();
 };
 $('repeat').onclick = () => {
