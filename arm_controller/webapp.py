@@ -371,7 +371,8 @@ def bootstrap():
             "key_present": bool(os.environ.get("BASETEN_API_KEY") or os.environ.get("BASETEN")),
             "planner_model": os.environ.get("BASETEN_MODEL") or DEFAULT_MODEL,
             "audio_model": audio_model, "audio_model_supported": audio_model in AUDIO_MODELS,
-            "audio_endpoint_status": "unverified; last recorded live probe timed out",
+            "audio_endpoint_status": "Configured on Baseten; startup does not probe health. "
+                                     "See each take's actual reviewer, fallback and result.",
             "active_attempt": manager.active()}
 
 

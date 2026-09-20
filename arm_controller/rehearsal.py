@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from model.audio import evaluate_file, prepare_clip
+from model.audio import AUDIO_REVIEW_BUDGET_S, evaluate_file, prepare_clip
 from model.baseten import BasetenError
 from pydantic import Field
 from tap_history import (
@@ -457,23 +457,29 @@ class RehearsalManager:
     def _review(self, attempt, path):
         record = attempt.record
         plan = TapPlan.model_validate(record["plan"])
-        # Deterministic local measurement FIRST: reproducible per-note onset/
-        # clarity/pitch numbers from the capture itself. This — not the audio
-        # model's hearing — is the planner's primary evidence. Local DSP only.
+        # Local estimates first, with source binding and uncertainty. Both the
+        # audio evaluator and planner receive them; neither source is infallible.
         try:
             metrics = measure_take(path.read_bytes(), record["telemetry"],
                                    int(record["capture"]["dispatch_frame"]),
                                    [pitch(n.string, n.fret) for n in plan.notes])
         except Exception as exc:  # noqa: BLE001 - measurement is best-effort, never blocks
-            metrics = {"error": f"local measurement failed ({type(exc).__name__})"}
+            metrics = {"status": "unavailable", "error": f"local measurement failed ({type(exc).__name__})"}
         with self.lock:
             record["acoustic_metrics"] = metrics
             self._save(attempt)
+            if attempt.stop.is_set():
+                self._finish(attempt, "stopped", record["error"])
+                return
+            audio_budget = min(AUDIO_REVIEW_BUDGET_S, max(0, attempt.stage_deadline - self.clock()))
         try:
-            # No retry here: one audio request, and at most one text revision request.
+            # One evaluator invocation: at most primary + one logged transient
+            # fallback, then at most one separately bounded text proposal.
             report = self.evaluate(path, expected_phrase=expected_phrase(plan),
                                    attempt_id=record["attempt_id"], source="browser_microphone",
-                                   allow_upload=True)
+                                   allow_upload=True, acoustic_metrics=copy.deepcopy(metrics),
+                                   should_stop=attempt.stop.is_set, budget_s=audio_budget,
+                                   timing_target_available=False)
             with self.lock:
                 if attempt.stop.is_set():
                     self._finish(attempt, "stopped", record["error"])
@@ -483,10 +489,8 @@ class RehearsalManager:
                     self._finish(attempt, "unavailable", report.get("error", "Audio assessment unavailable"))
                     return
                 assessment = record["assessment"] = report["assessment"]
-                # Only a genuinely empty/corrupt recording blocks the loop now.
-                # Uncertain hearing still reaches the planner WITH its caveats —
-                # the operator sees the graded score/suggestions either way, and
-                # the planner may simply decide "keep" on weak evidence.
+                # Uncertain evidence can still reach the planner with caveats
+                # and a null score. It should keep/inspect, not invent precision.
                 if assessment["recording_quality"] == "unusable":
                     self._finish(attempt, "inspect", "Recording unusable; check the microphone, then listen and retake")
                     return

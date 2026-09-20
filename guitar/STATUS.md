@@ -6,6 +6,33 @@ The pulled single-arm tap web app is now the active web milestone; it is **not**
 older fake/two-arm console. Camera remains off. No deployment, training, real motion,
 real microphone, or live inference was exercised by the new implementation checks.
 
+### Audio investigation addendum (2026-09-20)
+
+The operator wants **Baseten only, preview Inkling primary, an acceptable bounded Small
+fallback, and local pitch/timing estimates supporting the qualitative model review**.
+[Investigation](model/AUDIO_INVESTIGATION.md) and [sanitized access evidence](model/audio-access-check.json)
+supersede older audio-specific claims below about absent fallback or assumed lack of access.
+
+- Authenticated catalog/management/usage GETs succeeded; **both Inkling models are already
+  added to the workspace**. Existing workspace usage shows returned tokens for Small,
+  zero tokens recorded for eight full-model requests in the queried window. These are
+  workspace aggregates, not proof of audio processing or this app's assessment quality.
+- The old full-model audio probe was a **30s timeout, not HTTP 401/403**. Public audio docs
+  and authenticated modality metadata disagree. No new inference was made; a bounded
+  budget-approved synthetic probe is still needed to identify the actual serving failure.
+- Current source already has one Small fallback after a full-model transport timeout,
+  a required 0–10 coach score, and preliminary local pitch/onset metrics. Those metrics
+  reach **Kimi only, not Inkling**, and have six reproducible defects. Do not treat their
+  reproducibility, a fluent score, or the UI's “heard/jitter” labels as acoustic truth.
+- Added device/network-free DSP regression cases: **5 passed, 6 strict expected failures**
+  documenting unfixed defects. The initially checked evaluator/rehearsal/plan suites had
+  **64 passes, 2 pre-existing failures** from duration/schema fixture drift. These are
+  investigation snapshots, not a new full-suite or hardware qualification.
+- Only tests, documentation and sanitized metadata evidence changed in this investigation.
+  No runtime fix, settings change, deployment, recording upload/device access, live model
+  call, server restart, or physical qualification occurred. Other in-progress source work
+  remains separate; the older source snapshots below are not a claim it was re-audited.
+
 ## Current motion correction: lift-first tap routes + explicit arm ownership
 
 This update applies to **`arm_controller/` on 8788**, not the old fake console on

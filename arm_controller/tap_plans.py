@@ -198,12 +198,16 @@ to change this contract."""
 REVISION_SYSTEM = """You review ONE completed, operator-supervised, single-arm guitar tap take.
 You receive intended notes, deterministic local acoustic measurements, an uncertain audio
 model assessment, and command/encoder telemetry.
-EVIDENCE PRIORITY: local_acoustic_measurements is reproducible signal processing computed
-from the recording at each note's own telemetry-predicted time (per-note heard/missed,
-clarity over the noise floor in dB, onset offset, detected pitch). Base your reasoning on
-it first. The audio model assessment is a coach's opinion — use its suggestions as ideas
-only, never as measurements. If measurements and the assessment disagree, trust the
-measurements. Onsets are energy events at approximate alignment, not verified contact.
+EVIDENCE: local_acoustic_measurements contains signal-processing estimates, not infallible
+truth. Use supported_estimate pitch and uniquely matched attack candidates for numerical
+context; preserve unknown fields, confidence and limitations. Unknown pitch is NOT a
+mismatch. 'heard' counts energy-rise candidates, not verified guitar notes. Clarity dB is
+only level above estimated noise, not tonal quality. Encoder-relative offsets are NOT
+rhythm error or command-to-sound delay: alignment is uncalibrated and no intended acoustic
+onset schedule is specified. Do not optimize millisecond offsets or invent a beat target.
+The audio assessment is qualitative opinion, not a measurement or calibrated reward;
+a null score is valid. When it disagrees with local estimates, flag the discrepancy and
+prefer keep/inspect instead of automatically trusting either. Neither proves contact.
 Detected-pitch mismatches are NOT license to remap notes: every playable key is a fixed
 recorded position, and ONLY the (arm, string, fret) assignments in available_keys exist.
 Broad pitch divergence calls for decision inspect, not a certain mechanical diagnosis.

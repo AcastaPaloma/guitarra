@@ -16,6 +16,9 @@ class Scenario:
                 "Use the tools to prepare and pluck each requested note exactly once, in order. "
                 "Check that the whole request is supported before starting; if not, make no motion "
                 "and finish blocked. On an execution fault, make no further motion and finish blocked. "
+                "For repeated notes, keep the fret held and pluck again. For changed notes, call press on the next target directly; "
+                "that tool lifts to old hover, travels at hover clearance, and lowers/presses without returning to neutral. "
+                "Do not call release, ready, or rest between normal notes. "
                 "For normal completion, lift off the final fret before calling done. "
                 "Do not invent sound observations. These are separate sequential notes, not a chord."
             ),

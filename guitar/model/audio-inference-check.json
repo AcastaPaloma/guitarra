@@ -1,0 +1,82 @@
+{
+  "kind": "approved_synthetic_inkling_connectivity_probe",
+  "started_at_utc": "2026-09-20T04:06:40.283426+00:00",
+  "provider": "baseten",
+  "endpoint": "https://inference.baseten.co/v1/chat/completions",
+  "status": "connectivity_passed_quality_not_validated",
+  "approved_budget_usd": "0.10",
+  "approved_maximum_requests": 3,
+  "requests_made": 3,
+  "conservative_reserved_usd": "0.07480010",
+  "usage_based_cost_upper_estimate_usd": "0.00175575",
+  "cost_note": "Calculated from reported input/output tokens using catalog uncached prices. Not an invoice; no usage was missing. No more inference calls made in this batch.",
+  "source": "synthetic_fixture",
+  "audio": {
+    "duration_s": 1,
+    "sample_rate_hz": 16000,
+    "encoding": "mono_PCM16_WAV",
+    "known_contents": "Two separated tonal bursts: 220 Hz and 330 Hz; no speech or room noise. Event count/frequencies were not supplied as the model's expected phrase.",
+    "is_real_guitar_recording": false
+  },
+  "requests": [
+    {
+      "case": "full_text_control",
+      "model": "thinkingmachines/inkling",
+      "reasoning_effort": "none",
+      "max_tokens": 32,
+      "timeout_s": 90,
+      "http_status": 200,
+      "finish_reason": "stop",
+      "elapsed_s": 0.485,
+      "text_control_passed": true,
+      "usage": {"input": 21, "output": 5, "audio_input": 0},
+      "cost_upper_estimate_usd": "0.00004125"
+    },
+    {
+      "case": "full_synthetic_audio",
+      "model": "thinkingmachines/inkling",
+      "reasoning_effort": "none",
+      "max_tokens": 384,
+      "timeout_s": 90,
+      "http_status": 200,
+      "finish_reason": "stop",
+      "elapsed_s": 6.447,
+      "assessment_schema_version_tested": "guitarra.audio-assessment.v1",
+      "assessment_schema_valid": true,
+      "usage": {"input": 633, "output": 132, "audio_input": 21},
+      "cost_upper_estimate_usd": "0.00116760",
+      "quality_observation": "Described one synthetic blip/chime and room noise, not the two generated tones; assigned score 0 despite no performance target. This is not accurate event counting or a useful music score."
+    },
+    {
+      "case": "small_synthetic_audio",
+      "model": "thinkingmachines/inkling-small",
+      "returned_model": "thinkingmachines/Inkling-Small",
+      "reasoning_effort": "none",
+      "max_tokens": 384,
+      "timeout_s": 90,
+      "http_status": 200,
+      "finish_reason": "stop",
+      "elapsed_s": 3.272,
+      "assessment_schema_version_tested": "guitarra.audio-assessment.v1",
+      "assessment_schema_valid": true,
+      "usage": {"input": 633, "output": 192, "audio_input": 21},
+      "cost_upper_estimate_usd": "0.0005469",
+      "quality_observation": "Described a mechanical click and room noise rather than the two generated tones; assigned score 3 despite no performance target."
+    }
+  ],
+  "conclusions": [
+    "This credential currently has working full-Inkling text and audio inference, and Small audio inference. No access denial occurred.",
+    "Successful audio-token responses show that the earlier catalog modality omission is not an audio access blocker for these requests.",
+    "The older timeouts' cause is not proven: reasoning depth, preview serving state, routing and elapsed time differed. This was not a controlled high-versus-none latency benchmark.",
+    "Keep full Inkling primary with a bounded explicit Small fallback, but use confidence-aware local pitch/onset estimates rather than asking either model for exact measurements.",
+    "The subsequent v2 evidence-packet/null-score/fallback changes were verified offline only; no fourth request, new live guitar review or physical optimization was performed."
+  ],
+  "hardware_connected": false,
+  "microphone_used": false,
+  "camera_used": false,
+  "user_media_uploaded": false,
+  "deployment_created": false,
+  "server_restarted": false,
+  "is_physical_qualification": false,
+  "private_full_report": "guitar/runs/audio/inkling-approved-probe-20260920.json"
+}

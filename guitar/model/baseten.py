@@ -27,9 +27,11 @@ class BasetenError(RuntimeError):
 class BasetenRequestError(BasetenError):
     """Infrastructure/access failure, distinct from a model's invalid tool response."""
 
-    def __init__(self, message: str, *, status_code: int | None = None):
+    def __init__(self, message: str, *, status_code: int | None = None,
+                 kind: str | None = None):
         super().__init__(message)
         self.status_code = status_code
+        self.kind = kind or ("http_error" if status_code is not None else "transport_error")
 
 
 def load_env_file(path: Path) -> None:
@@ -91,12 +93,16 @@ def request_json(url: str, *, key: str, payload: dict | None = None,
     except urllib.error.HTTPError as exc:
         hints = {400: "request/model parameters rejected", 401: "check the .env API key",
                  402: "account billing/credits required", 403: "model/account access denied",
-                 404: "model not available", 429: "rate limit reached"}
+                 404: "model not available", 408: "request timed out", 429: "rate limit reached",
+                 500: "provider internal error", 502: "provider gateway error",
+                 503: "provider unavailable", 504: "provider gateway timeout", 529: "provider overloaded"}
         # Deliberately don't echo request headers or arbitrary provider error bodies.
         raise BasetenRequestError(f"Baseten HTTP {exc.code}: {hints.get(exc.code, 'provider request failed')}",
                                   status_code=exc.code) from None
-    except (urllib.error.URLError, TimeoutError, OSError):
-        raise BasetenRequestError("Baseten connection failed or timed out; no automatic retry") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+        raise BasetenRequestError("Baseten connection failed or timed out; no automatic retry",
+                                  kind="timeout" if timed_out else "connection_error") from None
     except (ValueError, UnicodeError):
         raise BasetenError("Baseten returned invalid JSON") from None
     if not isinstance(result, dict) or result.get("error"):

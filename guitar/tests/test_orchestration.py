@@ -152,6 +152,7 @@ def test_full_workflow_and_real_trace_grading(tmp_path):
     report = run(SCENARIOS["repeat-and-change"], Scripted(complete_steps()), output_dir=output, verbose=False)
     assert report["evaluation"]["passed"]
     assert report["evaluation"]["redundant_repeat_presses"] == 0
+    assert report["evaluation"]["unnecessary_fret_neutral_between_notes"] == []
     assert report["model_requests"] == 8
     assert report["virtual_seconds"] > 0
     assert report["hardware_enabled"] is False
@@ -159,6 +160,27 @@ def test_full_workflow_and_real_trace_grading(tmp_path):
     records = [json.loads(line) for line in (output / "events.jsonl").read_text().splitlines()]
     assert len([r for r in records if r["type"] == "tool"]) == 8
     assert (output / "tools.json").exists()
+
+
+def test_returning_to_fret_neutral_between_notes_fails_efficiency_grading(tmp_path):
+    plan = [
+        ("ready", {"arm": "pick"}),
+        ("press", {"string": 5, "fret": 5, "profile": PROFILE}),
+        ("pluck", {"string": 5, "profile": PROFILE}),
+        ("release", {}),
+        ("rest", {"arm": "fret"}),
+        ("press", {"string": 3, "fret": 3, "profile": PROFILE}),
+        ("pluck", {"string": 3, "profile": PROFILE}),
+        ("release", {}),
+        ("done", {"outcome": "completed", "reason": "fixture completed"}),
+    ]
+    # Use a shorter changed-note fixture so the failure is specifically neutral/rest between notes.
+    from orchestration.scenarios import Scenario
+    report = run(Scenario("two-note-change", ((5, 5), (3, 3))), Scripted(plan),
+                 output_dir=tmp_path / "run", verbose=False)
+    assert not report["evaluation"]["passed"]
+    assert not report["evaluation"]["checks"]["no_unnecessary_fret_neutral_between_notes"]
+    assert [e["tool"] for e in report["evaluation"]["unnecessary_fret_neutral_between_notes"]] == ["release", "rest"]
 
 
 def test_alternative_valid_approach_is_not_marked_wrong(tmp_path):

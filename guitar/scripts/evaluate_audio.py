@@ -16,16 +16,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from model.audio import evaluate_file, prepare_clip  # noqa: E402
+from model.audio import MAX_SECONDS, evaluate_file, prepare_clip  # noqa: E402
 from model.baseten import BasetenError  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--wav", type=Path, required=True, help="a selected PCM16 WAV, at most 60 seconds")
+    parser.add_argument("--wav", type=Path, required=True, help=f"a selected PCM16 WAV, at most {MAX_SECONDS} seconds")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--inspect", action="store_true", help="local validation/metadata only; no key or network")
-    mode.add_argument("--allow-upload", action="store_true", help="consent to upload this clip and consume Baseten credits")
+    mode.add_argument("--allow-upload", action="store_true", help="consent to upload this clip: Inkling plus at most one Small fallback, consuming Baseten credits")
     parser.add_argument("--attempt-id", help="unique identifier for this recording, e.g. take-001")
     parser.add_argument("--expected", help="intended phrase/notes and timing, if known")
     parser.add_argument("--source", choices=["operator_recording", "synthetic_fixture"], default="operator_recording")

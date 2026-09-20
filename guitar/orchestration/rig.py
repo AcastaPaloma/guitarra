@@ -79,12 +79,12 @@ class FakeRig:
         return [
             _spec("available", "Read both arms' sandbox capabilities, supported targets and profiles; no movement.", {}),
             _spec("where", "Read both fake arms' state and any latched fault; no movement or sensor access.", {}),
-            _spec("ready", "Prepare the selected arm. Fret: lift if needed, then saved ready pose. Pick: synthetic readiness.", {"arm": arm}),
-            _spec("hover", "Fret arm: automatically lift before travel, enter via ready if needed, finish above target. No contact.", target),
+            _spec("ready", "Prepare the selected arm. Fret: lift if needed, then saved ready pose; use only before the first fret motion or after completion, not between notes. Pick: synthetic readiness.", {"arm": arm}),
+            _spec("hover", "Fret arm: automatically lift before travel, enter via ready only if needed, finish above target. No contact. Useful for inspection, but press already includes the required safe hover path.", target),
             _spec("touch", "Fret arm: hover then recorded contact, with no extra press. Touch alone is NOT ready to pluck in this fixture.", target),
-            _spec("press", "Fret arm: automatically lift/travel/hover/contact/press a supported spot. Returns only after fake completion. No separate hover call required. Keep the press for repeat plucks; pressing again repeats the approach.", {**target, "profile": profile}),
-            _spec("release", "Lift the fretting fingertip off its string to hover. NEVER opens a gripper. Does not move the pick arm.", {}),
-            _spec("rest", "Return the selected arm to rest; fret automatically lifts and exits via ready. Not necessary between notes.", {"arm": arm}),
+            _spec("press", "Fret arm: safe direct transition to a supported spot. If another fret is held, this FIRST lifts to the old hover, then travels minimally at hover clearance to the new hover, lowers to touch, and presses. No separate release/ready/rest call is needed between different notes. Keep the press for repeat plucks; pressing the same target again repeats the approach and is inefficient.", {**target, "profile": profile}),
+            _spec("release", "Lift the fretting fingertip off its string to hover. NEVER opens a gripper. Use after the final pluck or when aborting; do not release between normal sequential notes because press can transition directly.", {}),
+            _spec("rest", "Return the selected arm to rest/neutral; fret automatically lifts and exits via ready. Do NOT use between notes. It is only for explicit completion/parking or operator-requested cleanup.", {"arm": arm}),
             _spec("move_to", "Fret arm only: recall a saved pose through Motions routing. A touch pose is not an extra press. Coordinates cannot be supplied.", {
                 "pose": {"type": "string", "enum": sorted(self.arm.poses)}}),
             _spec("pluck", "Synthetic pick arm: pluck once and reset to ready. Requires pick at ready AND fret arm successfully pressing the SAME string. Returns a symbolic event, not sound. Repeated plucks can reuse the held fret.", {

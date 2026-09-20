@@ -29,7 +29,7 @@ def response():
         "recording_quality": "unusable", "notes_match": "not_assessed", "timing_match": "not_assessed",
         "summary": "Insufficient acoustic evidence.", "observations": [],
         "limitations": ["This is an offline mocked response, not a model hearing the guitar."],
-        "score": 0, "suggestions": ["Check capture quality before judging any notes."],
+        "score": None, "suggestions": ["Check capture quality before judging any notes."],
     }
     return {"choices": [{"finish_reason": "stop", "message": {
         "role": "assistant", "content": json.dumps(assessment)}}],
@@ -91,6 +91,7 @@ def fake_client(monkeypatch):
     monkeypatch.setattr(audio, "load_env", lambda: None)
     monkeypatch.setenv("BASETEN_AUDIO_MODEL", "thinkingmachines/inkling")
     monkeypatch.setenv("BASETEN_AUDIO_TIMEOUT_S", "30")
+    monkeypatch.setenv("BASETEN_AUDIO_REASONING_EFFORT", "none")
     monkeypatch.setenv("BASETEN_MODEL", "moonshotai/Kimi-K3")
     return client, factory
 
@@ -105,6 +106,9 @@ def test_evaluator_request_has_audio_schema_and_no_tools(tmp_path, fake_client):
     assert report["clip"]["upload_sha256"]
     assert factory.call_args.kwargs["model"] == "thinkingmachines/inkling"
     assert factory.call_args.kwargs["timeout_s"] == 30
+    assert factory.call_args.kwargs["effort"] == "none"
+    assert factory.call_args.kwargs["max_tokens"] == audio.MAX_RESPONSE_TOKENS
+    assert len(report["requests"]) == 1
     messages = client.chat.call_args.args[0]
     assert "tools" not in client.chat.call_args.kwargs
     assert client.chat.call_args.kwargs["response_format"]["type"] == "json_schema"
@@ -118,9 +122,9 @@ def test_evaluator_request_has_audio_schema_and_no_tools(tmp_path, fake_client):
     assert str(tmp_path) not in json.dumps(messages)
 
 
-def test_timeout_is_unavailable_not_negative_score(tmp_path, fake_client):
+def test_response_failure_is_unavailable_not_negative_score(tmp_path, fake_client):
     client, _ = fake_client
-    client.chat.side_effect = BasetenError("Provider timed out")
+    client.chat.side_effect = BasetenError("Fixture invalid provider response")
     report = audio.evaluate_file(wav_file(tmp_path), expected_phrase="A2", attempt_id="one", allow_upload=True)
     assert report["status"] == "unavailable" and report["assessment"] is None
     assert client.chat.call_count == 1  # no retry or fallback

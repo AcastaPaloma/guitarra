@@ -71,6 +71,9 @@ def test_operator_can_continue_same_session_without_replanning_or_auto_play(mana
     previous = manager.revise.call_args.kwargs["history"]
     assert len(previous) == 3 and [r["take_number"] for r in previous] == [2, 3, 4]
     assert "wav" not in json.dumps(previous) and "base64" not in json.dumps(previous)
+    assert previous[-1]["local_acoustic_summary"]["schema_version"] == "guitarra.local-acoustics.v2"
+    assert previous[-1]["local_acoustic_summary"]["alignment"]["calibrated"] is False
+    assert "per_note" not in previous[-1]["local_acoustic_summary"]  # bounded summary, not waveform/full trace
 
 
 def test_favorite_is_persistent_human_preference_not_model_score(manager):

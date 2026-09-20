@@ -100,6 +100,11 @@ def test_full_cycle_requires_a_separate_approved_play(manager):
     assert not manager.busy
     assert manager.evaluate.call_args.kwargs["source"] == "browser_microphone"
     assert manager.evaluate.call_args.kwargs["allow_upload"] is True
+    assert manager.evaluate.call_args.kwargs["acoustic_metrics"] == result["acoustic_metrics"]
+    assert manager.revise.call_args.kwargs["acoustic_metrics"] == result["acoustic_metrics"]
+    assert manager.evaluate.call_args.kwargs["should_stop"]() is False
+    assert 0 < manager.evaluate.call_args.kwargs["budget_s"] <= 75
+    assert result["acoustic_metrics"]["source_sha256"] == result["capture"]["clip"]["source_sha256"]
     report = manager.root / result["attempt_id"] / "attempt.json"
     saved = json.loads(report.read_text())
     assert saved["plan"]["notes"][0]["pause_ms"] == 250
@@ -283,3 +288,30 @@ def test_restart_never_resumes_previous_motion_or_recording(manager):
     assert fresh.active() is None
     with pytest.raises(RehearsalError, match="previous-server"):
         fresh.start(record["attempt_id"], capture_start(record))
+
+
+def test_stop_during_local_measurement_prevents_upload(manager, monkeypatch):
+    import rehearsal
+    record = manager.create(plan())
+    def cancelled_measurement(*args, **kwargs):
+        manager.stop(record["attempt_id"])
+        return {"status": "unavailable", "error": "Fixture cancellation"}
+    monkeypatch.setattr(rehearsal, "measure_take", cancelled_measurement)
+    manager.start(record["attempt_id"], capture_start(record))
+    wait_for(manager, record, {"awaiting_audio"})
+    manager.accept_audio(record["attempt_id"], capture_end(record), wav_bytes())
+    result = wait_for(manager, record, {"stopped"})
+    assert not manager.evaluate.called and not manager.revise.called
+    assert result["assessment"] is None
+
+
+def test_local_measurement_failure_is_forwarded_as_unavailable(manager, monkeypatch):
+    import rehearsal
+    def broken(*args, **kwargs):
+        raise ValueError("Fixture DSP failure")
+    monkeypatch.setattr(rehearsal, "measure_take", broken)
+    result = complete(manager)
+    metrics = manager.evaluate.call_args.kwargs["acoustic_metrics"]
+    assert metrics["status"] == "unavailable"
+    assert "per_note" not in metrics and "summary" not in metrics
+    assert result["acoustic_metrics"] == metrics

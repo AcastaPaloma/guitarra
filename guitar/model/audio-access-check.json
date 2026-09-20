@@ -1,0 +1,109 @@
+{
+  "checked_on_utc": "2026-09-20",
+  "provider": "baseten",
+  "kind": "authenticated_metadata_and_existing_usage_check_not_inference",
+  "inference_requests_made": 0,
+  "audio_uploaded": false,
+  "hardware_connected": false,
+  "microphone_used": false,
+  "camera_used": false,
+  "deployment_created": false,
+  "configuration": {
+    "source": "local environment/file resolution, not inspection of the running process environment",
+    "api_key_present": true,
+    "credential_variable": "BASETEN_API_KEY",
+    "credential_source": "guitar/.env",
+    "credential_locations_agree": true,
+    "audio_model": "thinkingmachines/inkling",
+    "audio_timeout_s": 30,
+    "audio_reasoning_effort_in_source": "high",
+    "configured_http_proxy_present": false
+  },
+  "running_web_bootstrap": {
+    "endpoint": "http://127.0.0.1:8788/api/bootstrap",
+    "key_present": true,
+    "planner_model": "moonshotai/Kimi-K3",
+    "audio_model": "thinkingmachines/inkling",
+    "audio_model_supported": true,
+    "audio_endpoint_status": "unverified; last recorded live probe timed out",
+    "status_field_is_hardcoded_in_source": true,
+    "limitation": "This status string is not a live Baseten health or entitlement check. Session tokens and attempt details were not printed or saved."
+  },
+  "inference_catalog": {
+    "endpoint": "https://inference.baseten.co/v1/models",
+    "authenticated_request_succeeded": true,
+    "models": [
+      {
+        "id": "thinkingmachines/inkling",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      },
+      {
+        "id": "thinkingmachines/inkling-small",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      }
+    ],
+    "discrepancy": "Public audio docs list both models as audio-capable, but this catalog response omits audio. This is not proof of either audio access denial or successful audio serving."
+  },
+  "workspace_catalog": {
+    "checked_at_utc": "2026-09-20T03:35:32.034846+00:00",
+    "endpoint": "https://api.baseten.co/v1/model_apis?limit=100",
+    "authenticated_request_succeeded": true,
+    "pagination_complete": true,
+    "elapsed_s": 0.52,
+    "models": [
+      {
+        "name": "thinkingmachines/inkling",
+        "workspace_added": true,
+        "added_at": "2026-09-19T13:23:05.993Z",
+        "last_used_at": "2026-09-19T23:35:27.479Z",
+        "requests_per_minute": 15,
+        "tokens_per_minute": 100000
+      },
+      {
+        "name": "thinkingmachines/inkling-small",
+        "workspace_added": true,
+        "added_at": "2026-09-19T23:39:19.782Z",
+        "last_used_at": "2026-09-20T03:09:17.142Z",
+        "requests_per_minute": 120,
+        "tokens_per_minute": 500000
+      }
+    ]
+  },
+  "existing_workspace_usage": {
+    "endpoint": "https://api.baseten.co/v1/model_apis/usage",
+    "authenticated_request_succeeded": true,
+    "scope": "workspace-wide, grouped and filtered by model; not filtered to this application or credential",
+    "start_time_utc": "2026-09-19T13:00:00Z",
+    "queried_on_utc": "2026-09-20",
+    "bucket_width": "1h",
+    "pagination_complete": true,
+    "models": [
+      {
+        "model": "thinkingmachines/inkling",
+        "request_count": 8,
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      {
+        "model": "thinkingmachines/inkling-small",
+        "request_count": 9,
+        "input_tokens": 11201,
+        "output_tokens": 8336
+      }
+    ],
+    "limitations": [
+      "This endpoint does not distinguish text from audio usage or provide per-request errors.",
+      "Nonzero output tokens do not establish that a guitar clip was heard or accurately assessed.",
+      "Zero recorded tokens do not identify the cause of failed/incomplete serving or prove an entitlement denial."
+    ]
+  },
+  "conclusion": "Credentials authenticate and both models are present in the workspace. Full Inkling's recorded local failure was a timeout, not an access-denied response. End-to-end preview audio behavior and the cause of the timeout still require a bounded approved inference probe.",
+  "sources": [
+    "https://docs.baseten.co/inference/model-apis/audio",
+    "https://docs.baseten.co/inference/model-apis/reasoning",
+    "https://docs.baseten.co/reference/management-api/model-apis/gets-a-model-api-by-name",
+    "https://docs.baseten.co/reference/management-api/model-apis/gets-model-apis-token-usage"
+  ]
+}

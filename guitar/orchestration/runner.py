@@ -17,8 +17,14 @@ This is software-only evaluation: do not connect hardware or ask for a camera/au
 The dryrun_default profile is permitted for this sandbox, NOT a hardware-qualified profile.
 The fret tools use existing Motions/FakeArm code. The pick tools are explicitly synthetic.
 Use exactly one tool per response. Check capabilities and reason from returned state.
-Actions finish before returning. press includes lift/approach; separate hover/touch calls
-are optional, not mandatory. Reuse a held fret for repeated plucks rather than pressing again.
+Actions finish before returning. Optimize the fret trajectory by staying in the fretboard
+workspace between sequential notes: do NOT return the fret arm to ready/rest/neutral between
+normal notes. press already implements the safe direct transition: lift the currently held
+fret to its recorded hover, move at hover clearance toward the next recorded hover with
+minimal unnecessary travel, then lower/contact/press. Separate hover/touch calls are optional
+inspection steps, not required for normal playing. Reuse a held fret for repeated plucks
+rather than pressing again. When changing notes, call press for the next target directly;
+do not call release, ready, or rest first unless aborting or finishing.
 Prepare the pick arm before its first pluck; each pluck resets it to ready. Never pluck until
 the fret arm reports a successful press on the same string. release lifts a fingertip only;
 it never opens a gripper. No tool changes grip, calibration, or safety limits.
@@ -82,6 +88,19 @@ def grade(scenario: Scenario, rig: FakeRig, stop_reason: str, error: str | None)
     redundant = sum(e["tool"] == "press" and e["result"]["ok"]
                     and e["before"]["fret"]["contact"] == "pressed"
                     and e["before"]["fret"]["target"] == e["after"]["fret"]["target"] for e in events)
+    neutral_between_notes = []
+    if completed:
+        plucks_seen = 0
+        total_plucks = len(scenario.notes)
+        for e in events:
+            if e["tool"] == "pluck" and e["result"]["ok"]:
+                plucks_seen += 1
+                continue
+            if plucks_seen and plucks_seen < total_plucks and e["result"]["ok"]:
+                fret_neutral = e["tool"] in {"release", "rest"} or (e["tool"] == "ready" and e["args"].get("arm") == "fret")
+                if fret_neutral:
+                    neutral_between_notes.append({"index": e["index"], "tool": e["tool"], "args": e["args"]})
+    checks["no_unnecessary_fret_neutral_between_notes"] = not neutral_between_notes
     status = "incomplete" if stop_reason in {"provider_error", "interrupted", "cancelled", "paused_budget_exhausted"} else (
         "passed" if all(checks.values()) else "failed")
     return {
@@ -89,7 +108,8 @@ def grade(scenario: Scenario, rig: FakeRig, stop_reason: str, error: str | None)
         "observed_notes": [{"string": s, "fret": f} for s, f in actual],
         "tool_calls": len(events), "rejections": len(rejected), "unexpected_rejections": len(unexpected),
         "redundant_repeat_presses": redundant,
-        "efficiency_note": "Extra safe approach steps are not correctness failures; repeat presses are reported separately.",
+        "unnecessary_fret_neutral_between_notes": neutral_between_notes,
+        "efficiency_note": "The expected optimized pattern is press next target directly from the held fret: old hover -> new hover -> touch/press. Release/ready/rest between normal notes is now a grading failure; final release is still required.",
         "not_evaluated": ["sound_quality", "physical_timing", "collision_clearance", "thermal_safety", "real_pick_motion"],
     }
 

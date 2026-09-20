@@ -32,17 +32,22 @@ safety limits, or executable code. Local code remains authoritative. There is no
 | Text/state planner | **Kimi K3, live synthetic tool round trip verified** |
 | Camera | Off by default and unnecessary. Kimi supports optional images, but this was not exercised. |
 | Local audio estimates | Existing mic/scorer may provide text summaries; not raw-audio understanding. |
-| Raw-audio evaluator | File adapter implemented; full Inkling still times out, including the synthetic audio probe. Listening/critique and rehearsal integration remain unverified. |
+| Raw-audio evaluator | Inkling on Baseten remains primary; Small is an accepted bounded fallback. Single-arm web integration exists; acoustic quality remains unverified. The old full-model probe timed out, but current authenticated metadata confirms both models are already in the workspace. See [investigation](AUDIO_INVESTIGATION.md). |
 
 Full `thinkingmachines/inkling` (not Small) was initially selected for combined reasoning
 and documented audio support, but both normal and streaming inference requests timed out.
 Kimi K3 then returned native tool calls successfully. This was connectivity troubleshooting,
-not an accuracy bake-off. **No automatic model fallback** remains in the application.
+not an accuracy bake-off or proof of an entitlement denial. The **audio adapter now has
+one Small fallback after a full-model transport timeout**; Kimi's planner choice is separate.
+The operator explicitly accepts that fallback and wants all hosted inference on Baseten.
+No replacement deployment is proposed by the current audio investigation.
 
 Kimi K3 itself is not a raw-audio model on the current Baseten surface. The separate
-[file-based evaluator](AUDIO.md) now implements consented requests with no motion tools.
-It validates PCM16 WAV files and resamples them to the documented 16 kHz input. The current
-microphone capture is 44.1 kHz; automatic capture/export and report ingestion are still pending. Neither an accepted WAV nor a fluent explanation
+[file-based evaluator](AUDIO.md) implements consented requests with no motion tools,
+validates PCM16 WAV files and resamples them to the documented 16 kHz input. The active
+single-arm web app captures/exports browser audio and ingests the assessment; the legacy
+CLI remains separate. Preliminary local pitch/onset estimates reach Kimi, not yet Inkling,
+and have documented regression failures. Neither an accepted WAV nor a fluent explanation
 proves accurate note-quality assessment or a mechanical diagnosis.
 
 ## Evidence and limits

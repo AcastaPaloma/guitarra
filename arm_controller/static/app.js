@@ -366,25 +366,30 @@ function showReview(record) {
   $('attempt-label').textContent = String(record.take_number || record.attempt_number);
   const assessment = record.assessment;
   const measured = record.acoustic_metrics?.summary;
+  const report = record.audio_model_report;
+  const providerLine = report?.model ? `Audio reviewer: ${report.model}` +
+    (report.model_fallback_from ? ` (fallback from ${report.model_fallback_from})` : '') : null;
   const heardLine = measured
-    ? `measured: heard ${measured.notes_heard}/${measured.notes_planned}` +
-      (measured.pitch_matched ? ` · pitch match ${measured.pitch_matched}` : '') +
-      (measured.mean_clarity_db != null ? ` · clarity ~${measured.mean_clarity_db}dB` : '') +
-      (measured.onset_jitter_ms != null ? ` · timing jitter ${measured.onset_jitter_ms}ms` : '')
+    ? `estimated attack candidates matched: ${measured.notes_heard}/${measured.notes_planned}` +
+      ` · pitch matches ${measured.pitch_matched}/${measured.pitch_assessed ?? 'unknown'} assessed` +
+      (measured.mean_clarity_db != null ? ` · level ~${measured.mean_clarity_db}dB above estimated noise` : '')
     : null;
   $('assessment-status').textContent = [
-    measured ? `heard ${measured.notes_heard}/${measured.notes_planned}` : null,
-    assessment && typeof assessment.score === 'number' ? `score ${assessment.score}/10` : null,
+    measured ? `attacks matched ${measured.notes_heard}/${measured.notes_planned}` : null,
+    assessment && typeof assessment.score === 'number' ? `model opinion ${assessment.score}/10` : null,
     assessment ? `notes ${rating(assessment.notes_match)} · timing ${rating(assessment.timing_match)}` : 'review unavailable',
   ].filter(Boolean).join(' · ');
   $('assessment-summary').textContent = brief(assessment?.summary || record.error || 'No audio assessment received.');
   list('observations', [
+    ...(providerLine ? [providerLine] : []),
+    ...(report?.requests || []).filter(r => r.error).map(r => `${r.model}: ${r.error}`),
     ...(heardLine ? [heardLine] : []),
-    ...(measured?.missed_indices?.length ? [`no onset detected for notes ${measured.missed_indices.map(i => i + 1).join(', ')}`] : []),
+    ...(measured?.missed_indices?.length ? [`no unique attack detected for notes ${measured.missed_indices.map(i => i + 1).join(', ')}; not a missed-contact diagnosis`] : []),
+    ...(measured?.unknown_indices?.length ? [`measurement unavailable for notes ${measured.unknown_indices.map(i => i + 1).join(', ')}`] : []),
     ...(assessment ? [assessment.summary, `Recording quality: ${assessment.recording_quality}`,
       ...assessment.observations, ...(assessment.suggestions || []).map(s => `try: ${s}`)] : []),
   ]);
-  list('limitations', assessment?.limitations || []);
+  list('limitations', [...(record.acoustic_metrics?.limitations || []), ...(assessment?.limitations || [])]);
   if (record.revision) {
     $('proposal').hidden = false;
     $('rationale').textContent = brief(record.revision.rationale);

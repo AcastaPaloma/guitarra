@@ -127,6 +127,9 @@ class SessionArchive:
                 "created_at": record["created_at"], "phase": record["phase"],
                 "playback_outcome": record["playback_outcome"], "tuning_id": tuning_id(record["plan"]),
                 "plan": record["plan"], "assessment": assessment, "error": record.get("error"),
+                "local_acoustic_summary": {key: (record.get("acoustic_metrics") or {}).get(key)
+                                           for key in ("schema_version", "status", "summary", "alignment")},
+                "audio_reviewer": (record.get("audio_model_report") or {}).get("model"),
                 "revision": record.get("revision"), "command_elapsed_s": elapsed,
                 "command_delta_from_first_s": delta, "same_phrase_and_calibration": comparable,
                 "audio_available": bool(record.get("capture") or record.get("partial_capture")),
@@ -142,7 +145,8 @@ class SessionArchive:
         # Bounded textual memory, never raw audio, hardware targets, or tool instructions.
         rows = [r for r in self.history(session_id)["takes"] if r["attempt_id"] != current_id][-3:]
         return [{key: row[key] for key in ("take_number", "plan", "assessment", "playback_outcome",
-                                           "command_elapsed_s", "same_phrase_and_calibration", "preferred_by_operator")}
+                                           "command_elapsed_s", "same_phrase_and_calibration", "preferred_by_operator",
+                                           "local_acoustic_summary", "audio_reviewer")}
                 for row in rows]
 
     def prefer(self, session_id, attempt_id):
