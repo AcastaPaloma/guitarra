@@ -25,7 +25,10 @@ PRESS_SPEED = 250
 TAP_SPEED = 1200
 TAP_DWELL_S = 0.12
 ACC = 30
-SETTLE_TOL = 30
+# Measured travel repeatability (2026-09-20): joints land 31-46 counts off on
+# longer moves (base yaw and shoulder), so 30 faulted healthy takes. 60 keeps
+# arrival meaningful (~5°) while matching what the servos actually deliver.
+SETTLE_TOL = 60
 PRESS_TOL = 90
 SETTLE_TIMEOUT = 4.0
 CLEARANCE_DWELL_S = 0.09  # continuous encoder arrival, NOT proof of string clearance
