@@ -658,24 +658,39 @@ class ForceStopReq(StrictModel):
     pass  # explicit empty JSON body; the loopback middleware requires JSON
 
 
-def _park_after_force_stop():
-    """Operator policy (2026-09-20): after FORCE STOP — and only then — both
-    arms revert to their recorded rest. Waits for the frozen take to release
-    the serial buses, then parks each arm lift-first: shoulder/elbow/wrist-flex
-    rise to rest values before base/roll rotate, at slow speed. Best effort:
-    any failure leaves that arm frozen with torque held (the previous
-    behavior); normal takes and cooperative stops are unaffected."""
-    deadline = time.monotonic() + 20
-    while manager.busy and time.monotonic() < deadline:
-        time.sleep(0.25)
-    time.sleep(0.5)  # let the executor finish closing its serial handles
-    for module, port in ((fret, fret.FRET_PORT), (arm1, arm1.ARM1_PORT)):
+class ParkReq(StrictModel):
+    pass  # explicit empty JSON body; the loopback middleware requires JSON
+
+
+@app.post("/api/park")
+def park(_req: ParkReq):
+    """Operator-initiated reset: both arms move to their recorded rest so the
+    next take's entry check passes. Same lift-first routine as the force-stop
+    recovery. Refused while a take, riff, or calibration owns the buses."""
+    if manager.busy:
+        raise RehearsalError("A take is executing; stop it before resetting the arms")
+    if sna_running():
+        raise RehearsalError("The riff is playing; wait for it to finish before resetting")
+    if calibration.session_active():
+        raise RehearsalError("A calibration session owns the arms; close it first")
+    return {"arms": _park_arms()}
+
+
+def _park_arms() -> dict:
+    """Move both arms to their recorded rest, lift-first (shoulder/elbow/
+    wrist-flex rise before base/roll rotate) at slow speed. Best effort per
+    arm: failure leaves that arm as-is with whatever torque it had. Only
+    called when no take/riff/calibration owns the buses."""
+    results = {}
+    for label, module, port in (("primary", fret, fret.FRET_PORT),
+                                ("secondary", arm1, arm1.ARM1_PORT)):
         try:
             rest = module.load_map()["rest"]
             ids = list(module.BODY_IDS) if hasattr(module, "BODY_IDS") else list(module.MOTOR_IDS)
             bus = fret.FeetechBus(port, 1_000_000)
-        except Exception:
-            continue  # arm absent/limp state unchanged
+        except Exception as exc:
+            results[label] = f"unavailable ({type(exc).__name__})"
+            continue  # arm absent; its state is unchanged
         try:
             time.sleep(0.2)
             for sid in ids:
@@ -686,14 +701,29 @@ def _park_after_force_stop():
                     bus.goto(sid, rest[sid], speed=200)
                 settle = time.monotonic() + 8
                 while time.monotonic() < settle:
-                    if all((p := bus.read_pos(s)) is not None and abs(p - rest[s]) <= 30
+                    if all((p := bus.read_pos(s)) is not None and abs(p - rest[s]) <= 25
                            for s in group):
                         break
                     time.sleep(0.05)
-        except Exception:
-            pass  # frozen-with-torque remains the fallback state
+            results[label] = all((p := bus.read_pos(s)) is not None and abs(p - rest[s]) <= 30
+                                 for s in ids)
+        except Exception as exc:
+            results[label] = f"failed ({type(exc).__name__})"
         finally:
             bus.close()
+    return results
+
+
+def _park_after_force_stop():
+    """Operator policy (2026-09-20): after FORCE STOP — and only then — both
+    arms revert to their recorded rest automatically. Waits for the frozen
+    take to release the serial buses first. Normal takes and cooperative
+    stops are unaffected."""
+    deadline = time.monotonic() + 20
+    while manager.busy and time.monotonic() < deadline:
+        time.sleep(0.25)
+    time.sleep(0.5)  # let the executor finish closing its serial handles
+    _park_arms()
 
 
 @app.post("/api/force-stop")

@@ -369,7 +369,11 @@ class RehearsalManager:
         except Exception as exc:  # noqa: BLE001 - boundary must fail closed on any driver failure
             with self.lock:
                 attempt.record["playback_outcome"] = "fault"
-                self._finish(attempt, "fault", f"Playback failed ({type(exc).__name__}); "
+                # Include the driver's own reason (bounded): "state uncertain" alone
+                # kept hiding actionable causes like "arm is not at the expected rest".
+                detail = " ".join(str(exc).split())[:300]
+                self._finish(attempt, "fault", f"Playback failed ({type(exc).__name__}"
+                             f"{': ' + detail if detail else ''}); "
                              "state uncertain, inspect the arm. No recovery/homing or review.")
 
     def accept_audio(self, attempt_id, metadata: CaptureComplete, wav_bytes: bytes):

@@ -82,6 +82,7 @@ function controls() {
   $('confirm-play').disabled = running || !pathReady || !$('media-consent').checked || !$('supervised').checked;
   $('stop').disabled = !running && !foreignActive && !snaRunning;
   $('force-stop').disabled = !running && !foreignActive && !snaRunning;
+  $('park').disabled = running || foreignActive || snaRunning;
   for (const id of ['prompt', 'take-start', 'take-count', 'media-consent', 'supervised', 'session-select', 'change-song']) {
     $(id).disabled = running || foreignActive;
   }
@@ -307,9 +308,18 @@ $('force-stop').onclick = async () => {
   // No confirm dialog: this is the emergency control; a prompt would delay it.
   try {
     await api('/api/force-stop', {});
-    say('FORCE STOP — arm frozen mid-path, torque held. Recover via the calibrate page.', true);
+    say('FORCE STOP — arm frozen, then both arms revert to rest automatically.', true);
   } catch (error) { say('Force stop: ' + error.message, true); }
   if (running) void requestStop('Force stop.');
+};
+$('park').onclick = async () => {
+  $('park').disabled = true; say('Resetting arms to rest…');
+  try {
+    const result = await api('/api/park', {}, {timeout: 45000});
+    say('Reset: ' + Object.entries(result.arms)
+      .map(([arm, ok]) => `${arm} ${ok === true ? 'at rest ✓' : ok}`).join(' · '));
+  } catch (error) { say('Reset failed: ' + error.message, true); }
+  $('park').disabled = false; controls();
 };
 
 function resetReview() {
