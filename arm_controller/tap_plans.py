@@ -23,6 +23,7 @@ MAX_TAKE_NOTES = MAX_NOTES
 MAX_ATTEMPTS = 3
 MAX_PLAY_SECONDS = 150
 MAX_CAPTURE_SECONDS = 160  # keeps MAX_WAV_BYTES under audio.py's 32 MiB input cap
+NOTE_PACE_S = 3.2  # measured ~2.7s/note (rest_hub) + margin; shared with the UI
 DEFAULT_PAUSE_MS = 250
 MAX_PAUSE_CHANGE_MS = 100
 STRING_NOTES = {1: "E4", 2: "B3", 3: "G3", 4: "D3", 5: "A2", 6: "E2"}
@@ -134,9 +135,14 @@ def validate_take(plan: TapPlan, keys: set[tuple[int, int]],
     # Planning estimate from live stage timings (~2.7s/note incl. dwell) plus
     # margin. NOT a worst case: a stage that hits its 4s encoder timeout faults
     # the take immediately, and the MAX_PLAY_SECONDS deadline bounds the total.
-    bound = len(plan.notes) * 3.2 + sum(n.pause_ms for n in plan.notes[:-1]) / 1000
+    bound = len(plan.notes) * NOTE_PACE_S + sum(n.pause_ms for n in plan.notes[:-1]) / 1000
     if bound > MAX_PLAY_SECONDS:
-        raise ValueError("Take exceeds the local execution budget; select fewer notes")
+        fits = int((MAX_PLAY_SECONDS + DEFAULT_PAUSE_MS / 1000)
+                   / (NOTE_PACE_S + DEFAULT_PAUSE_MS / 1000))
+        raise ValueError(
+            f"Take of {len(plan.notes)} notes needs ~{bound:.0f}s but the execution "
+            f"budget is {MAX_PLAY_SECONDS}s (capture cap). Select about {fits} notes "
+            "or fewer — play the song in sections.")
 
 
 def key_context(keys):

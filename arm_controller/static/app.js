@@ -102,10 +102,18 @@ function switchTab(history) {
 $('play-tab').onclick = () => switchTab(false);
 $('history-tab').onclick = () => { switchTab(true); void refreshSessions(); };
 
+// Longest take the server's execution/recording budget admits (default pauses).
+// The server re-validates with the plan's actual pauses; this keeps the UI's
+// defaults inside the budget instead of tripping a rejection.
+function budgetFit() {
+  const pause = 0.25, pace = config?.note_pace_s || 3.2, budget = config?.max_play_seconds || 150;
+  return Math.max(1, Math.floor((budget + pause) / (pace + pause)));
+}
+
 function selection() {
   const start = Math.trunc(Math.max(0, Math.min(arrangement.length - 1, (Number($('take-start').value) || 1) - 1)));
-  const count = Math.trunc(Math.max(1, Math.min(config?.max_take_notes || 4, arrangement.length - start,
-    Number($('take-count').value) || 1)));
+  const count = Math.trunc(Math.max(1, Math.min(config?.max_take_notes || 4, budgetFit(),
+    arrangement.length - start, Number($('take-count').value) || 1)));
   return {start, count, notes: arrangement.slice(start, start + count).map(n => ({...n}))};
 }
 
@@ -116,7 +124,13 @@ function selectTake() {
   document.querySelectorAll('.note').forEach((node, index) => {
     node.className = 'note' + (index >= start && index < start + count ? ' selected' : '');
   });
-  $('selected').textContent = (parentId ? 'proposed · ' : '') + pathProfile.replace('_', '-') + (notes.length > 1 ? ' · pauses after lift: ' + notes.slice(0, -1).map(n => n.pause_ms + 'ms').join(' / ') : ' · one tap');
+  const capped = arrangement.length > budgetFit() && count >= budgetFit()
+    ? ` · capped at ${budgetFit()} notes by the ${config?.max_play_seconds || 150}s recording budget — play the rest as another take` : '';
+  const pauses = notes.slice(0, -1).map(n => n.pause_ms);
+  const pauseText = pauses.length === 0 ? ' · one tap'
+    : new Set(pauses).size === 1 ? ` · ${pauses[0]}ms pause after each lift`
+    : ' · pauses after lift: ' + pauses.join('ms / ') + 'ms';
+  $('selected').textContent = (parentId ? 'proposed · ' : '') + pathProfile.replace('_', '-') + pauseText + capped;
 }
 
 function showArrangement(notes, title, profile) {
@@ -130,7 +144,7 @@ function showArrangement(notes, title, profile) {
     return node;
   }));
   $('take-start').max = arrangement.length; $('take-start').value = 1;
-  $('take-count').value = Math.min(config.max_take_notes, arrangement.length);
+  $('take-count').value = Math.min(config.max_take_notes, budgetFit(), arrangement.length);
   $('plan').hidden = false; $('composer').hidden = true; $('now').hidden = true;
   selectTake(); controls();
 }

@@ -193,8 +193,13 @@ class RehearsalManager:
             if parent_attempt_id and source_attempt_id:
                 raise RehearsalError("Choose a new proposal OR a saved performed tuning")
             registry = self.registry()
-            validate_take(plan, registry["keys"],
-                          registry.get("path_profiles", ("rest_hub",)))
+            try:
+                validate_take(plan, registry["keys"],
+                              registry.get("path_profiles", ("rest_hub",)))
+            except ValueError as exc:
+                # Admission refusal, not a server fault: surface as a clean 409
+                # message instead of an opaque 500 page.
+                raise RehearsalError(str(exc)) from None
             number, parent, source = 1, None, None
             if parent_attempt_id:
                 parent = self._get(parent_attempt_id)
