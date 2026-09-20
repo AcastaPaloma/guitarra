@@ -5,18 +5,17 @@ the whole instrument now: it sounds notes by TAPPING the pre-recorded keys
 (hammer-on style — press the string onto the fret fast, then lift). pluck.py
 is retired; do not wire its tools into any backend.
 
-v3 MAPPING (2026-09-19, full 18-cell grid re-recorded against the committed
-kinematic baseline — see CALIBRATION.md; supersedes v2 and the old 110-pose
-fret map; do NOT fall back to guitar/robot/poses/fret_arm.json):
-  keyframes_arm2.json holds one keypoint per cell, named pose-r{R}-c{C}:
-    r = fret row (1..3 recorded)
-    c = string/column, SAME convention as plucking: 1 = high E (rightmost)
-        ... 6 = low E (leftmost)
-  Values are RAW servo counts for IDs 7-11 (still the played source of
-  truth); each keypoint also carries "degrees" (relative to the baseline
-  pose) and "xyz_cm" (fingertip world position, kinematics.py) so callers
-  can reason spatially. 'rest' is the safe park pose; 'rest-r{R}' are
-  per-fret-row lifted hubs. The GRIPPER (ID 12) is NEVER commanded.
+v4 MAPPING (2026-09-19, rig physically re-positioned and fully re-recorded;
+supersedes the v3 grid — old data lives in keyframes_arm2.backup-*.json):
+  keyframes_arm2.json holds one keypoint per cell. Cell names accept the
+  operator's v4 shorthand r{R}_{C} as well as the older pose-r{R}-c{C}:
+    r = fret row (r1-r4 fully recorded, 24 cells)
+    c = string/column, 1 = high E (rightmost) ... 6 = low E (leftmost)
+  Values are RAW servo counts for IDs 7-11 — the played source of truth.
+  The XYZ/degrees enrichment is dormant until a new kinematic reference is
+  captured (the old one predates the move and was removed). 'rest' is the
+  safe park pose; 'rest-r{R}' hubs may be recorded later; other named
+  keyframes (e.g. 'neutral') load as extra poses. GRIPPER 12 NEVER commanded.
 
 === SAFETY / INTERFERENCE (v3 contract) ======================================
 Transitions are staged through lifted hubs, never sliding on the board:
@@ -63,7 +62,10 @@ KEYFRAMES_PATH = Path(__file__).parent / "keyframes_arm2.json"
 
 MOTOR_IDS = [7, 8, 9, 10, 11]  # gripper 12 deliberately absent
 STRING_NOTES = {1: "E4", 2: "B3", 3: "G3", 4: "D3", 5: "A2", 6: "E2"}
-MAX_FRET = 3  # first rows only, per operator (r4 was partially recorded; ignored)
+# v4 grid (2026-09-19, rig re-positioned & fully re-recorded): 24 cells,
+# rows r1-r4 across all six strings. MAX_FRET leaves headroom for an r5 —
+# playability is always whatever cells actually exist in the file.
+MAX_FRET = 5
 
 TRAVEL_SPEED = 400
 PRESS_SPEED = 250
@@ -81,6 +83,7 @@ SETTLE_TIMEOUT = 4.0
 
 _CELL = re.compile(r"pose[-_]?r(\d+)[-_]?c(\d+)$")
 _CELL_T = re.compile(r"pose[-_]?c(\d+)[-_]?r(\d+)$")  # transposed name variant
+_CELL_SHORT = re.compile(r"r(\d+)[-_](\d+)$")  # v4 operator shorthand: r{fret}_{string}
 _ROW_REST = re.compile(r"rest[-_]?r(\d+)$")
 
 
@@ -102,16 +105,16 @@ def load_map(path=KEYFRAMES_PATH, max_fret=MAX_FRET, *, entries=None):
         if rr:
             row_rests[int(rr.group(1))] = pose
             continue
-        m = _CELL.fullmatch(name) or _CELL_T.fullmatch(name)
+        m = _CELL.fullmatch(name) or _CELL_T.fullmatch(name) or _CELL_SHORT.fullmatch(name)
         if not m:
             if name.startswith(("pose", "rest")):  # near-miss of a grid name: flag it
                 warns.append(f"unrecognized keyframe name skipped: {k['name']}")
             elif len(pose) == len(MOTOR_IDS):
-                # operator-recorded extra pose (e.g. the SNA low-E frets "2".."10")
+                # operator-recorded extra pose (e.g. 'neutral' or the SNA frets)
                 extras[name] = pose
             continue
-        r, c = (int(m.group(1)), int(m.group(2))) if _CELL.fullmatch(name) else \
-               (int(m.group(2)), int(m.group(1)))
+        r, c = (int(m.group(2)), int(m.group(1))) if _CELL_T.fullmatch(name) else \
+               (int(m.group(1)), int(m.group(2)))
         if not (1 <= r <= max_fret and 1 <= c <= 6):
             warns.append(f"out of supported range (fret 1-{max_fret}), skipped: {k['name']}")
             continue
@@ -432,14 +435,16 @@ TOOLS = [
         "description": "Tap one pre-recorded key to SOUND its note (fast press "
                        "onto the fret, brief dwell, lift back to rest). This is "
                        "the only way this rig makes sound. String 1 = high E "
-                       "(rightmost) ... 6 = low E (leftmost); ONLY frets 1-3 are "
-                       "mapped. Transit uses the existing rest hub; full paths "
+                       "(rightmost) ... 6 = low E (leftmost); frets 1-4 recorded "
+                       "(schema allows 5 for future rows; only RECORDED cells play "
+                       "— check get_fret_position). "
+                       "Transit uses the existing rest hub; full paths "
                        "still require operator qualification. Callers never plan paths.",
         "parameters": {
             "type": "object",
             "properties": {
                 "string": {"type": "integer", "minimum": 1, "maximum": 6},
-                "fret": {"type": "integer", "minimum": 1, "maximum": 3},
+                "fret": {"type": "integer", "minimum": 1, "maximum": 5},
             },
             "required": ["string", "fret"],
         },
@@ -476,7 +481,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "string": {"type": "integer", "minimum": 1, "maximum": 6},
-                "fret": {"type": "integer", "minimum": 1, "maximum": 3},
+                "fret": {"type": "integer", "minimum": 1, "maximum": 5},
             },
             "required": ["string", "fret"],
         },
@@ -497,7 +502,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "string": {"type": "integer", "minimum": 1, "maximum": 6},
-                "fret": {"type": "integer", "minimum": 1, "maximum": 3},
+                "fret": {"type": "integer", "minimum": 1, "maximum": 5},
             },
             "required": ["string", "fret"],
         },

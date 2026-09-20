@@ -51,7 +51,7 @@ class StrictModel(BaseModel):
 
 class Key(StrictModel):
     string: int = Field(ge=1, le=6)
-    fret: int = Field(ge=1, le=3)
+    fret: int = Field(ge=1, le=5)
 
 
 class Note(Key):

@@ -31,3 +31,9 @@ def test_riff_requires_all_extra_poses():
 def test_sna_riff_uses_only_the_recorded_pose_names():
     assert {name for name, _ in fret.SNA_RIFF} == {"2", "3", "5", "7", "10"}
     assert len(fret.SNA_RIFF) == 16  # 7 7 10 7 5 3 2 | 7 7 10 7 5 3 5 3 2
+
+
+def test_v4_shorthand_cell_names_parse():
+    m = fret.load_map(entries=entries("rest", "r1_1", "r4_6", "r2-3", "neutral"))
+    assert set(m["cells"]) == {(1, 1), (6, 4), (3, 2)}
+    assert "neutral" in m["extras"] and m["warns"] == []

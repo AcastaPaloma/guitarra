@@ -233,7 +233,7 @@ if __name__ == "__main__":
         tab = fetch_track_notes(a.notes, a.track)
         print(condense(tab))
     if a.transcribe:
-        rig_keys = {(s, f) for s in range(1, 7) for f in range(1, 4)}
+        rig_keys = {(s, f) for s in range(1, 7) for f in range(1, 6)}
         tab = fetch_track_notes(a.transcribe, a.track)
         result = transcribe(tab, rig_keys)
         print(json.dumps(result, indent=2))
